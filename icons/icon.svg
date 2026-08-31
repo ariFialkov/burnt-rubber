@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a1e28"/>
+      <stop offset="1" stop-color="#0b0d12"/>
+    </linearGradient>
+    <linearGradient id="f" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2d55"/>
+      <stop offset="1" stop-color="#ffd12a"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#g)"/>
+  <!-- tire -->
+  <circle cx="256" cy="272" r="150" fill="#14161a" stroke="#2c313c" stroke-width="14"/>
+  <circle cx="256" cy="272" r="86" fill="#0b0d12" stroke="#3a4150" stroke-width="10"/>
+  <g stroke="#2c313c" stroke-width="16" stroke-linecap="round">
+    <line x1="256" y1="134" x2="256" y2="180"/>
+    <line x1="256" y1="364" x2="256" y2="410"/>
+    <line x1="118" y1="272" x2="164" y2="272"/>
+    <line x1="348" y1="272" x2="394" y2="272"/>
+    <line x1="158" y1="174" x2="191" y2="207"/>
+    <line x1="321" y1="337" x2="354" y2="370"/>
+    <line x1="354" y1="174" x2="321" y2="207"/>
+    <line x1="191" y1="337" x2="158" y2="370"/>
+  </g>
+  <!-- flame streak -->
+  <path d="M60 388 C150 400 210 396 268 372 C220 404 160 424 92 428 C140 442 232 438 300 408 C260 442 200 462 140 466 C260 474 372 434 428 352 C400 424 356 470 300 494 C398 470 462 400 470 312 L430 330 C444 276 436 220 404 176 C412 232 400 276 372 308 C384 244 366 180 320 136 C338 192 330 244 300 282 C304 214 276 150 220 110 C248 166 248 224 224 268 C208 210 168 166 112 146 C152 190 168 240 158 288 C120 300 88 330 60 388 Z"
+        fill="url(#f)" opacity="0.92"/>
+</svg>

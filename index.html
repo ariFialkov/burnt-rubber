@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#0b0d12" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Burnt Rubber</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <!-- HUB -->
+  <section id="view-hub" class="view">
+    <header class="topbar">
+      <div class="logo">BURNT<span>RUBBER</span></div>
+      <div class="topbar-right">
+        <button class="chip" id="btn-mybets">🎟️ <span id="openbets-count">0</span></button>
+        <button class="chip" id="btn-garage">🏁 Garage</button>
+        <button class="chip wallet" id="wallet-chip">◈ <span id="wallet-amt">0</span></button>
+      </div>
+    </header>
+
+    <div class="chyron" id="chyron">
+      <div class="chyron-live">● LIVE</div>
+      <div class="chyron-main">
+        <div class="chyron-title" id="chyron-title">—</div>
+        <div class="chyron-sub" id="chyron-sub">—</div>
+      </div>
+    </div>
+
+    <div class="tour-sheet" id="tour-sheet">
+      <button class="sheet-handle" id="sheet-handle"><span></span>ALL TOURS</button>
+      <div class="tour-cards" id="tour-cards"></div>
+    </div>
+  </section>
+
+  <!-- BET BOARD -->
+  <section id="view-board" class="view hidden">
+    <div class="panel board-panel">
+      <header class="panel-head">
+        <button class="chip back" data-back>‹ Hub</button>
+        <div class="panel-title">
+          <div id="board-title">—</div>
+          <div class="panel-sub" id="board-sub">—</div>
+        </div>
+        <button class="chip wallet" data-wallet>◈ <span class="wallet-amt-2">0</span></button>
+      </header>
+      <nav class="tabs" id="board-tabs"></nav>
+      <div class="board-rows" id="board-rows"></div>
+    </div>
+  </section>
+
+  <!-- LIVE RACE -->
+  <section id="view-live" class="view hidden">
+    <header class="live-top">
+      <button class="chip back" data-back>‹ Hub</button>
+      <div class="live-title">
+        <div id="live-race">—</div>
+        <div class="live-lap" id="live-lap">—</div>
+      </div>
+      <button class="chip wallet" data-wallet>◈ <span class="wallet-amt-2">0</span></button>
+    </header>
+    <aside class="tower" id="tower"></aside>
+    <div class="event-feed" id="event-feed"></div>
+    <div class="live-bets" id="live-bets"></div>
+    <div class="cam-bar">
+      <div class="car-select" id="car-select">
+        <button id="car-prev">‹</button>
+        <div class="car-name" id="car-name">—</div>
+        <button id="car-next">›</button>
+      </div>
+      <div class="cam-chips" id="cam-chips"></div>
+    </div>
+    <div class="popup-bet hidden" id="popup-bet"></div>
+    <div class="results hidden" id="results"></div>
+  </section>
+
+  <!-- GARAGE -->
+  <section id="view-garage" class="view hidden">
+    <div class="panel">
+      <header class="panel-head">
+        <button class="chip back" data-back>‹ Hub</button>
+        <div class="panel-title"><div>Garage — Sponsor a Racer</div>
+          <div class="panel-sub">Own a racer: +25% winnings on your winning WIN bets on them. Sell back anytime for 25% of price.</div>
+        </div>
+        <button class="chip wallet" data-wallet>◈ <span class="wallet-amt-2">0</span></button>
+      </header>
+      <nav class="tabs" id="garage-tabs"></nav>
+      <div class="board-rows" id="garage-rows"></div>
+    </div>
+  </section>
+
+  <!-- MY BETS -->
+  <section id="view-mybets" class="view hidden">
+    <div class="panel">
+      <header class="panel-head">
+        <button class="chip back" data-back>‹ Hub</button>
+        <div class="panel-title"><div>My Bets</div><div class="panel-sub" id="mybets-sub">—</div></div>
+        <button class="chip wallet" data-wallet>◈ <span class="wallet-amt-2">0</span></button>
+      </header>
+      <div class="board-rows" id="mybets-rows"></div>
+    </div>
+  </section>
+
+  <!-- BET SLIP (floating) -->
+  <div class="slip collapsed hidden" id="slip">
+    <button class="slip-head" id="slip-head">
+      <span>BET SLIP</span><span class="slip-count" id="slip-count">0</span>
+      <span class="slip-odds" id="slip-odds-mini"></span>
+    </button>
+    <div class="slip-body">
+      <div class="slip-legs" id="slip-legs"></div>
+      <div class="slip-stake">
+        <div class="quick-stakes" id="quick-stakes"></div>
+        <input id="stake-input" type="number" inputmode="numeric" min="1" placeholder="Stake" />
+      </div>
+      <button class="place-btn" id="place-btn">PLACE BET</button>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
