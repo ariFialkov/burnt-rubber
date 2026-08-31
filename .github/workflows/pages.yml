@@ -1,0 +1,39 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [claude/burnt-rubber-racing-game-t28bsc]
+  workflow_dispatch:
+
+# Allow GITHUB_TOKEN to enable Pages and publish the site.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; let a newer push supersede a queued one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Pages
+        # enablement:true turns Pages on for the repo if it isn't already.
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Upload site
+        # The game is fully static — the repo root is the site.
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
