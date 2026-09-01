@@ -15,7 +15,7 @@ const ENV_THEMES = {
   plains:   { ground: 0x7d9455, sky: 0xa2cceb, fog: 0xc3ddf0, props: 'trees' },
 };
 
-const ROAD_WIDTH = { formula: 13, stock: 17, rally: 11, baja: 20, moto: 11 };
+const ROAD_WIDTH = { formula: 13, stock: 19, rally: 14, baja: 26, moto: 11 };
 
 function controlPoints(style, rand) {
   const pts = [];

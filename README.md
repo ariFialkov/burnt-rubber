@@ -86,6 +86,16 @@ exactly to the scripted finish. Five cameras:
 - **Chopper**: aerial follow that climbs as the field spreads out so the
   whole race stays in frame
 
+Cars don't pass through each other: each carries a collision footprint and a
+separation pass keeps the field apart. It works in track space (offset along
+the track vs. across it) rather than 3D, so it stays cheap even with 40 Baja
+trucks — about 0.2 ms a frame. Racers hold their own line and ease aside with
+a look-ahead measured in time-to-contact, so a fast closer starts moving early
+instead of snapping; when the track is full across, the trailing car tucks in
+behind rather than driving through. All of it is presentation only — it moves
+where a car is *drawn*, never its distance along the track, so standings, gaps
+and the scripted finish are untouched.
+
 ## Code map
 
 ```

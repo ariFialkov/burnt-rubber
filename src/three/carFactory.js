@@ -2,6 +2,17 @@
 
 import * as THREE from 'three';
 
+// Collision footprints in track space: half-extents along the track (len) and
+// across it (width), in metres. Kept a touch tighter than the visual mesh so
+// cars can run genuinely door-to-door without the separation looking springy.
+export const COLLIDERS = {
+  formula: { len: 2.4, width: 1.05 },
+  stock: { len: 2.5, width: 1.15 },
+  rally: { len: 2.2, width: 1.0 },
+  baja: { len: 2.4, width: 1.3 },
+  moto: { len: 1.2, width: 0.5 },
+};
+
 const lam = (color) => new THREE.MeshLambertMaterial({ color });
 const dark = () => lam(0x14161a);
 
