@@ -30,6 +30,25 @@ Install it from the browser (Add to Home Screen / Install App); the service
 worker caches everything, and because the world runs off the wall clock and a
 deterministic seed, it works fully offline.
 
+## Building it to host elsewhere
+
+```sh
+npm run build          # -> build/            an uploadable copy of the site
+npm run build:single   # -> dist/burnt-rubber.html   the whole game in one file
+```
+
+`npm run build` ships the manifest as **manifest.json** rather than
+`manifest.webmanifest`, since many hosts reject that extension — the file is
+plain JSON either way and only the `<link rel="manifest">` matters. It prints
+every file type in the output so you can check it against a host's allowed
+extensions before uploading. Neither command needs `npm install`; there are no
+dependencies.
+
+`build:single` inlines three.js and every module into one `.html` file with no
+other requests at all — the fallback when a host only accepts a single page or
+a short list of extensions. It drops the service worker and manifest, so it is
+not installable as a PWA and does not work offline.
+
 ## The world
 
 | Tour | Vehicles | Racers/race | Bank |
