@@ -2,7 +2,7 @@
 // the freshly deployed build, offline the cached copy plays fully (the whole
 // game is static and deterministic — races run off the world clock).
 
-const CACHE = 'burnt-rubber-v2';
+const CACHE = 'burnt-rubber-v3';
 const ASSETS = [
   '.',
   'index.html',
@@ -32,6 +32,7 @@ const ASSETS = [
   'src/ui/live.js',
   'src/ui/garage.js',
   'src/ui/mybets.js',
+  'src/ui/tickets.js',
 ];
 
 self.addEventListener('install', (e) => {

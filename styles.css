@@ -57,6 +57,53 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .chip.wallet { color: var(--gold); border-color: rgba(255, 209, 42, 0.35); }
 .chip.back { font-weight: 800; }
 
+/* ---------- hub bet tracker ---------- */
+.hub-tickets {
+  position: absolute; left: 10px; top: calc(62px + var(--sat));
+  width: min(248px, 64vw);
+  max-height: calc(100% - 62px - var(--sat) - 250px - var(--sab));
+  display: flex; flex-direction: column; gap: 6px;
+  overflow-y: auto; scrollbar-width: none;
+  mask-image: linear-gradient(180deg, #000 94%, transparent);
+  padding-bottom: 8px;
+}
+.hub-tickets::-webkit-scrollbar { display: none; }
+.ht-head {
+  display: flex; align-items: center; gap: 7px;
+  color: var(--txt); font-weight: 900; font-size: 0.68rem; letter-spacing: 0.12em;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 11px; text-align: left;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.ht-count { background: var(--gold); color: #0b0d12; border-radius: 999px; padding: 0 7px; font-size: 0.68rem; }
+.ht-caret { margin-left: auto; color: var(--dim); }
+.hub-tickets.collapsed .tk { display: none; }
+.tk {
+  background: rgba(10, 12, 17, 0.82); border: 1px solid var(--line); border-radius: 10px;
+  padding: 7px 9px; cursor: pointer;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  transition: transform 0.1s, border-color 0.15s;
+}
+.tk:active { transform: scale(0.97); }
+.tk-top { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.tk-top b { font-size: 0.72rem; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-mid { color: var(--dim); font-size: 0.66rem; font-weight: 700; margin-top: 1px; font-variant-numeric: tabular-nums; }
+.tk-legs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.tk-chip {
+  font-size: 0.62rem; font-weight: 800; border-radius: 6px; padding: 2.5px 6px;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--dim);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.tk-chip i { font-style: normal; font-weight: 900; margin-right: 3px; }
+.tk-chip.ok { color: var(--green); border-color: rgba(46, 230, 168, 0.35); }
+.tk-chip.bad { color: var(--red); border-color: rgba(255, 77, 94, 0.3); }
+.tk-chip.live { color: var(--gold); border-color: rgba(255, 209, 42, 0.3); }
+.tk.settled { opacity: 0.85; }
+.tk-res { font-size: 0.68rem; font-weight: 900; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tk-res.won { color: var(--green); }
+.tk-res.lost { color: var(--red); }
+.tk.more { text-align: center; color: var(--dim); font-size: 0.68rem; font-weight: 800; padding: 6px; }
+
 /* ---------- chyron ---------- */
 .chyron {
   position: absolute; left: 14px; bottom: calc(158px + var(--sab));

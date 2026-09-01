@@ -61,6 +61,9 @@ live races at the same moment, with no server.
   it land.
 - **Sponsorship (Garage)**: pay a one-time fee to own a racer; winning WIN
   bets on them pay +25% winnings. Sell back anytime for 25% of the fee.
+- **Bet tracker**: a hub-screen rail with every open ticket's live progress
+  (current position, grid countdown, in-play props) and recent results —
+  tap a ticket to jump to its race.
 
 ### The RTP story
 

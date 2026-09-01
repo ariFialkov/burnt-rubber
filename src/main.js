@@ -13,6 +13,7 @@ import { initSlip, renderSlip } from './ui/slip.js';
 import { initLive, updateLive, enterLive } from './ui/live.js';
 import { initGarage, renderGarage } from './ui/garage.js';
 import { renderMyBets } from './ui/mybets.js';
+import { initTickets, renderTickets } from './ui/tickets.js';
 import { clamp } from './core/rng.js';
 
 const $ = (id) => document.getElementById(id);
@@ -115,6 +116,7 @@ initSlip(ctx);
 initBoard(ctx);
 initLive(ctx);
 initGarage(ctx);
+initTickets(ctx);
 updateWallet();
 if (topUpIfBroke()) toast('Welcome bonus: +10,000 ◈', 'win');
 
@@ -181,6 +183,7 @@ function frame(nowMs) {
   if (uiTimer > 0.45) {
     uiTimer = 0;
     if (ctx.view === 'hub' || ctx.view === 'garage' || ctx.view === 'mybets') updateHub(ctx, states);
+    if (ctx.view === 'hub') renderTickets(now);
     if (ctx.view === 'board') updateBoard(ctx);
   }
   if (ctx.view === 'live') updateLive(ctx);

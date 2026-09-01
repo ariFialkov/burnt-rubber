@@ -80,7 +80,7 @@ const FILES = [
   'src/engine/schedule.js', 'src/engine/odds.js', 'src/engine/script.js', 'src/engine/bets.js',
   'src/three/trackGen.js', 'src/three/carFactory.js', 'src/three/scene.js', 'src/three/cameras.js',
   'src/ui/avatars.js', 'src/ui/hub.js', 'src/ui/slip.js', 'src/ui/board.js', 'src/ui/live.js',
-  'src/ui/garage.js', 'src/ui/mybets.js', 'src/main.js',
+  'src/ui/garage.js', 'src/ui/mybets.js', 'src/ui/tickets.js', 'src/main.js',
 ];
 
 const mods = FILES.map(transform);
