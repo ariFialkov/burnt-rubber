@@ -1,7 +1,8 @@
-// Cache-first service worker: the whole game is static and deterministic,
-// so once cached it plays fully offline (races run off the world clock).
+// Network-first service worker with a cache fallback: online you always get
+// the freshly deployed build, offline the cached copy plays fully (the whole
+// game is static and deterministic — races run off the world clock).
 
-const CACHE = 'burnt-rubber-v1';
+const CACHE = 'burnt-rubber-v2';
 const ASSETS = [
   '.',
   'index.html',
@@ -46,17 +47,24 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== location.origin) return;
+
+  // Network first so a new deploy is picked up on the next load; the cache is
+  // refreshed on every success and serves as the offline fallback.
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then((hit) =>
-      hit ||
-      fetch(e.request).then((res) => {
-        if (res.ok && new URL(e.request.url).origin === location.origin) {
+    fetch(req)
+      .then((res) => {
+        if (res.ok) {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
+          caches.open(CACHE).then((c) => c.put(req, copy));
         }
         return res;
       })
-    )
+      .catch(() =>
+        caches.match(req, { ignoreSearch: true })
+          .then((hit) => hit || caches.match('index.html', { ignoreSearch: true }))
+      )
   );
 });

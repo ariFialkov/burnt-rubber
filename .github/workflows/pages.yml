@@ -5,13 +5,11 @@ on:
     branches: [claude/burnt-rubber-racing-game-t28bsc]
   workflow_dispatch:
 
-# Allow GITHUB_TOKEN to enable Pages and publish the site.
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# One deploy at a time; let a newer push supersede a queued one.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -24,16 +22,44 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      # The Actions token can read the Pages config but cannot create the site,
+      # so check first and report instead of failing the run.
+      - name: Check whether Pages is enabled
+        id: check
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pages")
+          if [ "$code" = "200" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: How to turn Pages on
+        if: steps.check.outputs.ready != 'true'
+        run: |
+          echo "::warning::GitHub Pages is not enabled for this repository yet, so there is nothing to deploy."
+          echo "Enable it once, then re-run this workflow:"
+          echo "  1. Settings -> Pages (https://github.com/${{ github.repository }}/settings/pages)"
+          echo "  2. Build and deployment -> Source: 'GitHub Actions'"
+          echo "  3. Actions tab -> 'Deploy to GitHub Pages' -> 'Run workflow'"
+          echo "The site will then be served at https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+
       - name: Configure Pages
-        # enablement:true turns Pages on for the repo if it isn't already.
+        if: steps.check.outputs.ready == 'true'
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
+
       - name: Upload site
         # The game is fully static — the repo root is the site.
+        if: steps.check.outputs.ready == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: .
+
       - name: Deploy
         id: deployment
+        if: steps.check.outputs.ready == 'true'
         uses: actions/deploy-pages@v4

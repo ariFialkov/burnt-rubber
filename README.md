@@ -9,7 +9,15 @@ game: every market is priced from the same probability model that decides the
 outcome, with the house margin set by a global RTP. The "stats", "form", and
 odds landscape exist to make the market interesting — not to be solved.
 
-## Running it
+## Play it
+
+- **Hosted build** — https://claude.ai/code/artifact/d7b29689-5a60-4ed5-a8c6-1b155cffdcfc
+  (a single self-contained page built by `node tools/bundle.mjs`)
+- **GitHub Pages** — https://arifialkov.github.io/burnt-rubber/ once Pages is
+  enabled for this repo (Settings → Pages → Source: **GitHub Actions**). The
+  workflow in `.github/workflows/pages.yml` then redeploys on every push.
+
+## Running it locally
 
 It's a fully static site — no build step, no dependencies to install
 (three.js is vendored). Serve the repo root over HTTP:
