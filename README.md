@@ -13,9 +13,8 @@ odds landscape exist to make the market interesting — not to be solved.
 
 - **Hosted build** — https://claude.ai/code/artifact/d7b29689-5a60-4ed5-a8c6-1b155cffdcfc
   (a single self-contained page built by `node tools/bundle.mjs`)
-- **GitHub Pages** — https://arifialkov.github.io/burnt-rubber/ once Pages is
-  enabled for this repo (Settings → Pages → Source: **GitHub Actions**). The
-  workflow in `.github/workflows/pages.yml` then redeploys on every push.
+- **GitHub Pages** — https://arifialkov.github.io/burnt-rubber/
+  (`.github/workflows/pages.yml` redeploys it on every push to this branch)
 
 ## Running it locally
 
