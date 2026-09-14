@@ -16,6 +16,7 @@ export const MODEL_FILES = {
   rally: 'assets/models/rally.glb',
   baja: 'assets/models/baja.glb',
   moto: 'assets/models/moto.glb',
+  rider: 'assets/models/rider.glb', // seated on every bike
 };
 
 const templates = new Map(); // vehicle -> { meta, parts: {role: geometry}, wheels: [{geometry, position, radius}] }
@@ -27,7 +28,7 @@ let envMap = null;
 // remapping the template's accent hues in the shader, so the painted shapes,
 // numbers and shading stay and only the colours change.
 export const LIVERY_DIR = 'assets/liveries/';
-export const LIVERY_VEHICLES = ['formula', 'stock', 'rally', 'baja', 'moto'];
+export const LIVERY_VEHICLES = ['formula', 'stock', 'rally', 'baja', 'moto', 'rider'];
 
 // Shared, look-alike materials: one each for the whole field.
 const SHARED = {
@@ -272,8 +273,18 @@ export function shadowBlob(width, length) {
   return m;
 }
 
-// Low-poly rider for the bike model, which ships without one. Leans into
-// the tank; suit takes the secondary colour, helmet the primary.
+// Where the rider's hips sit on the bike, as fractions of the bike's height
+// and length (+Z forward), and the rider's standing height in metres.
+export const RIDER_SEAT = { y: 0.58, z: -0.10, height: 1.72, lean: 0.0 };
+export function placeRider(obj, motoMeta) {
+  obj.scale.setScalar(RIDER_SEAT.height);
+  obj.position.set(0, motoMeta.height * RIDER_SEAT.y, motoMeta.length * RIDER_SEAT.z);
+  obj.rotation.x = RIDER_SEAT.lean;
+  return obj;
+}
+
+// Fallback rider when the model isn't available: boxes leaning into the
+// tank; suit takes the secondary colour, helmet the primary.
 function rider(primary, secondary, meta) {
   const g = new THREE.Group();
   const suit = new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.1, roughness: 0.7, envMap });
@@ -317,7 +328,17 @@ export function buildModelCar(vehicle, colors) {
     group.add(m);
     return m;
   });
-  if (vehicle === 'moto') group.add(rider(primary, secondary, t.meta));
+  if (vehicle === 'moto') {
+    const rt = templates.get('rider');
+    if (rt) {
+      const mat = hasLivery('rider') ? liveryMaterial('rider', colors) : new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.1, roughness: 0.7, envMap });
+      const r = new THREE.Mesh(rt.parts.body, mat);
+      r.name = 'rider';
+      group.add(placeRider(r, t.meta));
+    } else {
+      group.add(rider(primary, secondary, t.meta));
+    }
+  }
   group.add(shadowBlob(t.meta.width, t.meta.length));
   return { group, wheels, meta: t.meta };
 }

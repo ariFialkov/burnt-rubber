@@ -121,7 +121,15 @@ Wheels become their own nodes pivoted at the axle so they spin; the rest is
 grouped into `primary` and `secondary` bodywork (the team livery), `glass`,
 and `dark`. Every car on track shares the geometry and only carries its two
 livery materials. Paint is physically based with a baked studio reflection,
-each car casts a soft contact shadow, and the bike gets a leaning rider.
+each car casts a soft contact shadow, and the bike gets a rider.
+
+**The rider.** `assets/fbx-src/rider_tex.fbx` is a static A-pose figure. The
+pipeline poses it in code — the mesh is split by height and width into legs,
+arms, torso and head, and each limb is bent about its joint (knees to the
+pegs, elbows to the grips, torso onto the tank, helmet pitched up to the
+road) — then exports it as `rider.glb` with the hips at the origin. At
+runtime `placeRider` seats one on every bike; its suit and helmet use the
+same livery-remap shader as the bodywork, so it carries the team colours.
 
 **Liveries.** Every car is textured with its vehicle's painted PBR atlas
 (`assets/liveries/`: base colour and normal at 1024², roughness and
