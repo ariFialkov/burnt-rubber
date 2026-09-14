@@ -99,7 +99,34 @@ screen. The sponsorship bonus is funded by the one-time fee (of which only
 A race is decided the moment betting opens; what stays alive is the
 choreography. Gap curves with per-racer "drama harmonics" (inconsistent
 racers swing harder) produce overtakes and swings all race while converging
-exactly to the scripted finish. Five cameras:
+exactly to the scripted finish.
+
+**Pacing.** Every gap is measured against a virtual pace car with a
+per-class profile — launch acceleration and cruising speed
+(`PACE` in `src/engine/script.js`): formula cars launch hard and run fast,
+stock cars wind up slowly to a high speed, rally cars and bikes sit in the
+middle (bikes launch hard), trophy trucks lumber. The race distance is
+wherever the pace car gets to in the leader's 40 seconds, so the lap length
+follows from the profile. Gaps are kept in seconds but drawn in metres: on
+the grid a second is one row pitch, at cruise it is a cruise-speed's worth of
+road, so the whole field launches together from its real slots and stretches
+out as the speed builds. Every surge or fade (holeshot enforcement, popup
+choreography) is rate-limited — a bump that would be too steep starts
+earlier and fades later — so a charging car never exceeds about one and a
+half times the pace and nobody ever runs backwards. Drama only switches on
+once the field is up to speed.
+
+**Steering.** A car's position across the road is not set, it is driven:
+sideways speed is a slip angle on the forward speed (a car on the grid
+cannot slide across), it builds and bleeds at a bounded lateral
+acceleration, and the car is pointed where it is actually going. So the
+drawn path from the grid slot onward is one a car could drive — the racing
+line, the separation nudges and the queue-up behind a slower car all go
+through the same steering step. Corners are never tighter than the road
+can take (the track generator relaxes any bend whose centreline radius
+would fall under half the width plus a margin).
+
+Five cameras:
 
 - **3rd person** behind any car, **driver's view**, **hood-back**
 - **Cinematic**: trackside cameras auto-placed at the highest-curvature

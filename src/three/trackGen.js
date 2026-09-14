@@ -44,6 +44,19 @@ function controlPoints(style, rand) {
   return pts;
 }
 
+// Tightest turning radius along the curve (m), sampled.
+function minRadius(curve, lapLen) {
+  const N = 600;
+  let prev = curve.getTangentAt(0), r = Infinity;
+  for (let k = 1; k <= N; k++) {
+    const t = curve.getTangentAt((k % N) / N);
+    const ang = prev.angleTo(t);
+    if (ang > 1e-6) r = Math.min(r, (lapLen / N) / ang);
+    prev = t;
+  }
+  return r;
+}
+
 export function buildTrack(race, script) {
   const rand = rngFor('track-v1', race.trackSeed);
   const style = race.tour.style;
@@ -58,9 +71,30 @@ export function buildTrack(race, script) {
   const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal', 0.6);
 
   // Scale so lap length matches the race script exactly (speeds line up).
-  const scale = script.lapLen / curve.getLength();
-  pts.forEach((p) => { p.x *= scale; p.z *= scale; p.y *= scale; });
-  curve.updateArcLengths();
+  const fit = () => {
+    curve.updateArcLengths();
+    const scale = script.lapLen / curve.getLength();
+    pts.forEach((p) => { p.x *= scale; p.z *= scale; p.y *= scale; });
+    curve.updateArcLengths();
+  };
+  fit();
+
+  // No corner tighter than the road can take: a centreline radius under half
+  // the width would put the inside lane past the corner's own centre, where
+  // a car offset across the road is drawn going backwards. Relax the sharpest
+  // control points toward their neighbours until every corner clears it,
+  // refitting the length each time (smoothing shortens the loop, so the
+  // refit also grows it — both help).
+  const rMin = width / 2 + 5;
+  for (let iter = 0; iter < 60 && minRadius(curve, script.lapLen) < rMin; iter++) {
+    const n = pts.length;
+    const moved = pts.map((p, i) => {
+      const a = pts[(i + n - 1) % n], b = pts[(i + 1) % n];
+      return new THREE.Vector3(p.x + 0.22 * (a.x + b.x - 2 * p.x), p.y, p.z + 0.22 * (a.z + b.z - 2 * p.z));
+    });
+    pts.forEach((p, i) => p.copy(moved[i]));
+    fit();
+  }
 
   const group = new THREE.Group();
   const N = 700;

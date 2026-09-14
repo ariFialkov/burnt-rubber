@@ -6,9 +6,21 @@ import { rngFor, clamp, lerp, smoothstep } from '../core/rng.js';
 import { buildTrack } from './trackGen.js';
 import { buildCar, numberSprite, COLLIDERS } from './carFactory.js';
 import { buildModelCar, modelMeta, shadowBlob, eyeFor } from './models.js';
-import { getScript, getFocusLayer } from '../engine/script.js';
+import { getScript, getFocusLayer, GRID_OFFSET } from '../engine/script.js';
 
 const FWD = new THREE.Vector3(0, 0, 1);
+
+// How hard each class of vehicle can steer across the road: sideways speed as
+// a fraction of forward speed (a slip angle — a car at rest cannot move
+// across at all) and how quickly that sideways speed can build or bleed off
+// (m/s²). Rally and Baja cars throw themselves around; a stock car does not.
+const HANDLING = {
+  formula: { slip: 0.16, aLat: 7 },
+  stock:   { slip: 0.12, aLat: 5 },
+  rally:   { slip: 0.22, aLat: 6 },
+  baja:    { slip: 0.20, aLat: 4.5 },
+  moto:    { slip: 0.15, aLat: 5 },
+};
 
 export class RaceScene {
   constructor(race) {
@@ -22,7 +34,7 @@ export class RaceScene {
     this.track = track;
     this.scene.add(track.group);
     this.scene.background = new THREE.Color(track.theme.sky);
-    this.scene.fog = new THREE.Fog(track.theme.fog, 250, this.script.lapLen * 0.85);
+    this.scene.fog = new THREE.Fog(track.theme.fog, 250, Math.max(700, this.script.lapLen * 0.85));
 
     this.scene.add(new THREE.HemisphereLight(0xe8f0ff, 0x50483a, 1.05));
     const sun = new THREE.DirectionalLight(0xfff2d8, 1.6);
@@ -38,6 +50,7 @@ export class RaceScene {
       ? { len: meta.length * 0.48, width: meta.width * 0.45 }
       : (COLLIDERS[race.tour.vehicle] || COLLIDERS.formula);
     const colw = this.col.width;
+    this.handling = HANDLING[race.tour.vehicle] || HANDLING.formula;
     // Rank in the finishing order: cars adjacent here are the ones that spend
     // the race in each other's company, so they are what the line spread below
     // needs to keep apart.
@@ -76,9 +89,12 @@ export class RaceScene {
         homeBase: (((rankOf[i] * 0.6180339887498949) % 1) * 2 - 1) * laneSpan * 0.9,
         homeDriftF: 0.15 + rand() * 0.3,
         homeDriftP: rand() * Math.PI * 2,
-        // Separation state, carried across frames so it eases instead of snapping.
-        lane: 0, lon: 0, laneSet: false,
-        trackPos: 0, wantLane: 0,
+        // Motion state, carried across frames. `shown` is the distance the
+        // car is drawn at (the script's, floored so it never runs backwards);
+        // `lane` and `laneVel` are its position and speed across the road,
+        // `lon` how far it has dropped back behind a car it cannot pass.
+        shown: null, lane: 0, laneVel: 0, lon: 0, laneFresh: true,
+        yaw: 0, trackPos: 0, wantLane: 0, laneStart: 0,
       };
     });
     this.order = race.field.map((_, i) => i); // reused each frame, sorted by track position
@@ -102,16 +118,19 @@ export class RaceScene {
     this.adj = idx >= 0 ? getFocusLayer(this.race, idx).adj : null;
   }
 
-  // Static grid slot (two staggered columns behind the line).
+  // Grid geometry: two staggered columns behind the line. The distance back
+  // is the script's own (its distance() puts every car in this slot at t=0),
+  // so the launch simply continues from where the cars stood.
+  gridLane(k) { return (k % 2 === 0 ? -1 : 1) * this.track.width * 0.2; }
   gridSlot(k) {
     const { curve } = this.track;
     const lapLen = this.script.lapLen;
-    const back = 12 + k * 7.5;
+    const back = GRID_OFFSET + k * this.script.pitch;
     const u = ((-back / lapLen) % 1 + 1) % 1;
     const p = curve.getPointAt(u);
     const t = curve.getTangentAt(u);
     const n = new THREE.Vector3(-t.z, 0, t.x);
-    return { p: p.clone().addScaledVector(n, (k % 2 === 0 ? -1 : 1) * this.track.width * 0.2), t };
+    return { p: p.clone().addScaledVector(n, this.gridLane(k)), t };
   }
 
   // Keep cars from occupying the same space. This is presentation only: it
@@ -156,14 +175,10 @@ export class RaceScene {
     // distance gives the fast closer no time to get out of the way.
     const reach = minS + 45;
     const want = minN + skin;
-    // Hard cap on how far a car may slide across in one frame, no matter how
-    // many neighbours are leaning on it. This is what keeps it from snapping.
-    const maxFrame = 8 * dt;
 
     const cars = this.cars;
     const resort = () => this.order.sort((a, b) => cars[a].trackPos - cars[b].trackPos);
     resort();
-    for (const c of cars) c.laneStart = c.lane;
 
     // Lateral relaxation: three passes settle a dense pack without jitter.
     for (let pass = 0; pass < 3; pass++) {
@@ -219,17 +234,28 @@ export class RaceScene {
       });
     }
 
-    // Rate-limit the whole frame's movement per car, then re-clamp to the track.
+    // The relaxation has produced where each car would like to be this
+    // frame. Now steer toward it as a car would: sideways speed is a slip
+    // angle on the forward speed, and it builds and bleeds at a bounded rate,
+    // so the drawn path is a smooth curve the car can be pointed along — and
+    // a car on the grid cannot slide across at all.
+    const h = this.handling;
     for (const c of cars) {
-      c.lane = clamp(c.lane, c.laneStart - maxFrame, c.laneStart + maxFrame);
-      c.lane = clamp(c.lane, -bound, bound);
+      const goal = clamp(c.lane, -bound, bound);
+      c.lane = c.laneStart;
+      const want = goal - c.lane;
+      const vMax = Math.min(Math.max(0.05, c.speedS * h.slip), Math.sqrt(2 * h.aLat * Math.abs(want)));
+      const vTarget = clamp(want / 0.3, -vMax, vMax);
+      c.laneVel += clamp(vTarget - c.laneVel, -h.aLat * dt, h.aLat * dt);
+      const next = c.lane + c.laneVel * dt;
+      c.lane = clamp(next, -bound, bound);
+      if (c.lane !== next) c.laneVel = 0; // against the edge
     }
 
-    // Only after rate limiting do we know what actually stayed overlapped —
-    // those cars are genuinely boxed in, so the trailing one queues up behind
-    // instead of driving through. Checking before the clamp would miss them.
+    // Only now do we know what actually stayed overlapped — those cars are
+    // genuinely boxed in, so the trailing one queues up behind instead of
+    // driving through. Checking before steering would miss them.
     this.yieldBack(dt, maxLon);
-
   }
 
   // For pairs the lateral pass could not separate, the track is full across:
@@ -243,8 +269,14 @@ export class RaceScene {
     this.eachNearPair(minS, (ci, cj, ds) => {
       if (Math.abs(cj.lane - ci.lane) >= minN - 0.05) return; // it will clear across
       const trail = cj.dist < ci.dist ? cj : ci;
+      const lead = trail === ci ? cj : ci;
       const back = (minS + 0.3 - ds) * 0.6;
-      trail.lon = clamp(trail.lon - Math.min(back, 30 * dt), -maxLon, 0);
+      // Lifting off is only ever as abrupt as the closing speed calls for.
+      const rate = clamp(1.5 * Math.max(0, trail.speedS - lead.speedS) + 1, 1, 30);
+      // ...and never more than the car's own advance this frame, so lifting
+      // off means slowing, never rolling backwards.
+      const drop = Math.min(back, rate * dt, Math.max(0, trail.speed * dt * 0.9));
+      trail.lon = clamp(trail.lon - drop, -maxLon, 0);
       trail.trackPos = (((trail.dist + trail.lon) % lapLen) + lapLen) % lapLen;
     });
   }
@@ -255,41 +287,60 @@ export class RaceScene {
     const lapLen = script.lapLen;
     const s = clamp(tRace / script.T, 0, 1);
     const vehicle = this.race.tour.vehicle;
-    const blend = clamp(tRace / 2.2, 0, 1); // roll off the static grid
+    const t = mode === 'grid' ? 0 : tRace;
+    const live = mode === 'race' && !script.finished(t);
+    // The slowest a car is ever drawn moving while the race is on: the
+    // choreography can ask for a brief reversal where two fades overlap, and
+    // that is never shown.
+    const minStep = 0.25 * script.paceSpeed(t) * dt;
     let minD = Infinity, maxD = -Infinity;
 
     // Pass 1 — where each car wants to be, in track space.
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i];
-      if (mode === 'grid') {
-        car.dist = -1;
-        car.speed = 0;
-        car.lane = 0;
+      const scripted = script.distance(i, t, mode === 'grid' ? null : this.adj);
+      if (mode === 'grid' || car.shown === null || Math.abs(scripted - car.shown) > 60) {
+        // On the grid, or a scene picked up mid-race (or after a long stall):
+        // take the script's word for it and start from rest across the road.
+        car.shown = scripted;
+        car.speed = mode === 'grid' ? 0 : (scripted - script.distance(i, Math.max(0, t - 0.1), this.adj)) / 0.1;
+        car.speedS = car.speed;
         car.lon = 0;
-        car.laneSet = false;
-        continue;
+        car.laneVel = 0;
+        car.lane = this.gridLane(script.gridSlotOf[i]);
+        car.laneFresh = true;
+      } else {
+        const shown = live ? Math.max(scripted, car.shown + minStep) : scripted;
+        car.speed = Math.max(0, (shown - car.shown) / Math.max(dt, 1e-3));
+        car.speedS += (car.speed - car.speedS) * 0.2;
+        car.shown = shown;
       }
-      const dist = script.distance(i, tRace, this.adj);
-      car.speed = car.dist === -1
-        ? script.paceMps
-        : Math.max(0, (dist - car.dist) / Math.max(dt, 1e-3));
-      car.speedS = car.speedS === undefined ? car.speed : car.speedS + (car.speed - car.speedS) * 0.2;
+      const dist = car.shown;
       car.dist = dist;
       car.trackPos = ((((dist + car.lon) % lapLen) + lapLen) % lapLen);
-      // Hold a line, drifting slowly across the race, with a little jitter on
-      // top. Overtakes then come from the separation pass, not from everyone
-      // sweeping the whole track at once.
-      const span = this.laneSpan;
-      const home = car.homeBase + Math.sin(s * Math.PI * 2 * car.homeDriftF + car.homeDriftP) * span * 0.25;
-      const wander = Math.sin(s * Math.PI * 2 * car.laneF * 3 + car.laneP) * Math.min(1.1, this.col.width * 0.9);
-      car.wantLane = clamp(home + wander, -span, span);
-      if (!car.laneSet) { car.lane = car.wantLane; car.laneSet = true; }
-      // Drift back toward the natural racing line — deliberately rate-limited
-      // to half the separation's authority, so a car being pushed clear is
-      // never dragged back through its neighbour by the line pull.
-      const ease = (car.wantLane - car.lane) * (1 - Math.exp(-3.5 * dt));
-      car.lane += clamp(ease, -3 * dt, 3 * dt);
-      car.lon += (0 - car.lon) * (1 - Math.exp(-1.2 * dt));
+      if (mode === 'race') {
+        // Hold a line, drifting slowly across the race, with a little jitter
+        // on top. Overtakes then come from the separation pass, not from
+        // everyone sweeping the whole track at once.
+        const span = this.laneSpan;
+        const home = car.homeBase + Math.sin(s * Math.PI * 2 * car.homeDriftF + car.homeDriftP) * span * 0.25;
+        const wander = Math.sin(s * Math.PI * 2 * car.laneF * 3 + car.laneP) * Math.min(1.1, this.col.width * 0.9);
+        car.wantLane = clamp(home + wander, -span, span);
+        // A scene picked up mid-race starts on its line rather than steering
+        // over from the grid column; within the launch the column is right.
+        if (car.laneFresh && t > 1.5) car.lane = car.wantLane;
+        car.laneFresh = false;
+        car.laneStart = car.lane;
+        // Ease toward the racing line. This only seeds the goal the
+        // separation pass refines; the steering step decides how much of it
+        // the car can actually do this frame.
+        car.lane += (car.wantLane - car.lane) * (1 - Math.exp(-3.5 * dt));
+        // Close back up behind a car once there is room, no faster than a
+        // share of the car's own speed.
+        const rec = (0 - car.lon) * (1 - Math.exp(-1.2 * dt));
+        const cap = (0.3 * car.speedS + 0.5) * dt;
+        car.lon += clamp(rec, -cap, cap);
+      }
       if (dist > maxD) { maxD = dist; this.leaderIdx = i; }
       if (dist < minD) { minD = dist; this.backIdx = i; }
     }
@@ -297,35 +348,29 @@ export class RaceScene {
     // Pass 2 — push apart anything that overlaps.
     if (mode === 'race') this.separate(dt);
 
-    // Pass 3 — place the cars in the world.
+    // Pass 3 — place the cars in the world. Grid and race use the same
+    // formula, so the launch continues from exactly where the cars stood.
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i];
-      let tangent, pos;
+      const shown = car.dist + car.lon;
+      const u = ((shown / lapLen) % 1 + 1) % 1;
+      const p = this.track.curve.getPointAt(u);
+      const tangent = this.track.curve.getTangentAt(u);
+      const nrm = new THREE.Vector3(-tangent.z, 0, tangent.x);
+      const pos = p.clone().addScaledVector(nrm, car.lane);
+      if (mode === 'grid') pos.y += Math.sin(wallTime * 30 + i) * 0.015; // idle vibration
+      else if (vehicle === 'baja') pos.y += Math.abs(Math.sin(shown * 0.13 + car.bounceP)) * 0.35;
 
-      if (mode === 'grid') {
-        const slot = this.gridSlot(this.script.grid.indexOf(i));
-        pos = slot.p;
-        tangent = slot.t;
-        pos.y += Math.sin(wallTime * 30 + i) * 0.015; // idle vibration
-      } else {
-        const shown = car.dist + car.lon;
-        const u = ((shown / lapLen) % 1 + 1) % 1;
-        const p = this.track.curve.getPointAt(u);
-        tangent = this.track.curve.getTangentAt(u);
-        const nrm = new THREE.Vector3(-tangent.z, 0, tangent.x);
-        pos = p.clone().addScaledVector(nrm, car.lane * blend);
-        if (blend < 1) {
-          const slot = this.gridSlot(this.script.grid.indexOf(i));
-          pos.lerpVectors(slot.p, pos, smoothstep(blend));
-          tangent = slot.t.clone().lerp(tangent, blend).normalize();
-        }
-        if (vehicle === 'baja') pos.y += Math.abs(Math.sin(shown * 0.13 + car.bounceP)) * 0.35;
-      }
+      // Point the car where it is actually going: the track direction plus
+      // whatever it is steering across. (Lane +1 is the track's left.)
+      const yaw = mode === 'race' ? Math.atan2(car.laneVel, Math.max(car.speedS, 3)) : 0;
+      car.yaw += (yaw - car.yaw) * Math.min(1, 12 * dt);
 
       car.pos.copy(pos);
       car.tangent.copy(tangent);
       car.group.position.copy(pos);
       car.group.quaternion.setFromUnitVectors(FWD, tangent);
+      car.group.rotateY(-car.yaw);
 
       // Corner lean / drift flavor
       const u2 = (((car.dist + 8) / lapLen) % 1 + 1) % 1;

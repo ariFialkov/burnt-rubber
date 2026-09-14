@@ -31,7 +31,7 @@ export const TOURS = [
     tag: 'FC',
     vehicle: 'stock',
     fieldSize: 18,
-    laps: 5,
+    laps: 4,
     accent: '#ffd12a',
     style: 'oval',
     blurb: 'Heavy metal at 200 mph. Eighteen wide into turn one.',

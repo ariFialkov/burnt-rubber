@@ -12,6 +12,25 @@ import { RACE_S } from './schedule.js';
 
 export const LEADER_FINISH_S = 40; // leader completes the distance at t=40s
 
+// How each class of vehicle moves: launch acceleration (m/s²) and cruising
+// speed (m/s). The pace car — the virtual leader every gap is measured
+// against — pulls away from the line at `accel` and levels off at `cruise`,
+// so a formula car is gone in a blink, a stock car winds up slowly to a
+// higher speed, and a trophy truck lumbers. The race distance follows from
+// the profile: it is wherever the pace car gets to by LEADER_FINISH_S.
+export const PACE = {
+  formula: { accel: 14, cruise: 78 },
+  stock:   { accel: 6,  cruise: 80 },
+  rally:   { accel: 8,  cruise: 48 },
+  moto:    { accel: 13, cruise: 55 },
+  baja:    { accel: 4.5, cruise: 36 },
+};
+
+// Grid geometry (m): row pitch per vehicle, and how far the pole sits behind
+// the line. Two staggered columns, so the pitch is per car, not per row.
+export const GRID_PITCH = { formula: 7, stock: 6, rally: 6, moto: 4.5, baja: 7 };
+export const GRID_OFFSET = 12;
+
 const scriptCache = new Map();
 
 const drawFrom = (rand, probs) => {
@@ -23,12 +42,20 @@ const drawFrom = (rand, probs) => {
   return probs.length - 1;
 };
 
-// Smooth bump: 0 at s0 and s1, peak 1 midway.
-const bump = (s, s0, s1) => (s <= s0 || s >= s1 ? 0 : 0.5 * (1 - Math.cos((2 * Math.PI * (s - s0)) / (s1 - s0))));
+// Smooth bump: 0 at s0 and s1, peak 1 at sp, each side a half-cosine, so the
+// rise and the fade can have different lengths.
+const bump = (s, s0, sp, s1) => {
+  if (s <= s0 || s >= s1) return 0;
+  const x = s < sp ? (s - s0) / (sp - s0) : (s1 - s) / (s1 - sp);
+  return 0.5 * (1 - Math.cos(Math.PI * x));
+};
 
-// Drama window: no chaos on the grid, everything settled by the flag.
-function dramaWindow(s) {
-  const up = clamp(s / 0.12, 0, 1);
+// Drama window: nothing until the field is up to speed (a swing measured in
+// seconds is a lot of road at launch pace and would run cars backwards),
+// everything settled by the flag. `v` is the pace car's speed as a fraction
+// of cruise.
+function dramaWindow(s, v) {
+  const up = clamp((v - 0.5) / 0.4, 0, 1);
   const down = clamp((0.93 - s) / 0.1, 0, 1);
   return up * up * (3 - 2 * up) * (down * down * (3 - 2 * down));
 }
@@ -65,6 +92,34 @@ export function getScript(race) {
   const grid = race.field.map((_, i) => i).sort((a, b) => qualScore[b] - qualScore[a]);
   const gridGap = new Array(n);
   grid.forEach((racerI, k) => { gridGap[racerI] = k * (n > 20 ? 0.22 : 0.35); });
+  const gridSlotOf = new Array(n);
+  grid.forEach((racerI, k) => { gridSlotOf[racerI] = k; });
+
+  const T = LEADER_FINISH_S;
+  const pace = PACE[race.tour.vehicle] || PACE.formula;
+  const { accel, cruise } = pace;
+  // Pace-car profile: v = cruise·tanh(accel·t/cruise) starts at `accel` and
+  // eases into `cruise` with no knee; its integral is the distance.
+  const paceSpeed = (t) => cruise * Math.tanh((accel * t) / cruise);
+  const paceDist = (t) => ((cruise * cruise) / accel) * Math.log(Math.cosh((accel * t) / cruise));
+  const totalDist = paceDist(T);
+  const lapLen = totalDist / race.tour.laps;
+  const paceMps = cruise;
+
+  // A gap is kept in seconds, but drawn in metres. At cruise a second is a
+  // cruise-speed's worth of road; on the grid it is one row pitch, so that
+  // the whole field starts from its real slots and launches together instead
+  // of waiting for its time gap to elapse. The conversion ramps between the
+  // two over the launch, so the pack stretches out as the speed builds.
+  const pitch = GRID_PITCH[race.tour.vehicle] || 7;
+  const gridStep = n > 20 ? 0.22 : 0.35;
+  const metresPerSecOnGrid = pitch / gridStep;
+  const rampT = (2 * cruise) / accel;
+  const gapScale = (t) => {
+    const x = clamp(t / rampT, 0, 1);
+    const r = x * x * (3 - 2 * x);
+    return lerp(metresPerSecOnGrid, cruise, r);
+  };
 
   // --- Drama harmonics per racer (inconsistent racers swing harder).
   const harmonics = race.field.map((r, i) => {
@@ -78,47 +133,78 @@ export function getScript(race) {
 
   // --- Enforcement bumps (holeshot leading at the lap-1 mark, etc.)
   const enforce = [];
-  const lap1S = (1 / race.tour.laps) * 0.9;
+  // The lap-1 mark in race time, from the pace profile (a slow launch makes
+  // the first lap the longest).
+  const lap1S = (() => {
+    let lo = 0, hi = T;
+    for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (paceDist(mid) - GRID_OFFSET < lapLen * 0.9) lo = mid; else hi = mid; }
+    return lo / T;
+  })();
 
   // Base gap curve (seconds behind the virtual pace car) before enforcement.
   function rawGap(i, s) {
     const ease = s * s * (3 - 2 * s);
     let g = lerp(gridGap[i], finalGap[i], ease);
-    const w = dramaWindow(s);
+    const w = dramaWindow(s, paceSpeed(s * T) / cruise);
     for (const h of harmonics[i]) g += w * h.a * Math.sin(2 * Math.PI * h.f * s + h.ph);
     return g;
   }
+
+  // A surge or a fade is a bump on the gap curve. Its slope is a speed
+  // change — a second of gap per second is a whole pace-car's worth — so a
+  // bump that would be too steep starts earlier instead, and nothing starts
+  // before the field is up to speed. That keeps a charging car at no more
+  // than about one and a half times the pace and a fading one always moving.
+  const GAP_RATE = 0.45;
+  const upToSpeed = (Math.atanh(0.6) * cruise / accel) / T; // pace car at 60% of cruise
+  const SETTLED = 0.93;
+  // A bump peaking midway through [s0, s1]: the rise starts earlier and the
+  // fade runs later (never past SETTLED) as far as the rate needs.
+  function shape(s0, s1, amp) {
+    const half = (Math.PI * Math.abs(amp)) / (2 * GAP_RATE * T);
+    const sp = Math.max((s0 + s1) / 2, upToSpeed + 0.02);
+    s0 = Math.max(upToSpeed, Math.min(s0, sp - half));
+    s1 = Math.max(Math.min(SETTLED, Math.max(s1, sp + half)), sp + 0.02);
+    return { s0, sp, s1, amp };
+  }
+  // The largest bump that can peak at sp without breaking the rate.
+  const maxAmp = (sp) => (Math.min(sp - upToSpeed, SETTLED - sp) * 2 * GAP_RATE * T) / Math.PI;
 
   // Make the drawn holeshot racer actually lead at the lap-1 mark.
   {
     let minOther = Infinity;
     for (let i = 0; i < n; i++) if (i !== holeshotIdx) minOther = Math.min(minOther, rawGap(i, lap1S));
     const need = rawGap(holeshotIdx, lap1S) - minOther + 0.25;
-    if (need > 0) enforce.push({ i: holeshotIdx, s0: Math.max(0.02, lap1S - 0.16), s1: Math.min(0.9, lap1S + 0.2), amp: -need });
+    // Peaks at the mark; the fade back to the scripted gap runs long.
+    if (need > 0) {
+      const sh = shape(lap1S - 0.16, lap1S + 0.16, -need);
+      sh.sp = lap1S;
+      sh.s1 = Math.max(sh.s1, Math.min(SETTLED, lap1S + 0.3));
+      enforce.push({ i: holeshotIdx, ...sh });
+    }
   }
 
   function gapSec(i, s, adj) {
     let g = rawGap(i, s);
-    for (const e of enforce) if (e.i === i) g += e.amp * bump(s, e.s0, e.s1);
+    for (const e of enforce) if (e.i === i) g += e.amp * bump(s, e.s0, e.sp, e.s1);
     if (adj) g += adj(i, s);
     return g;
   }
 
-  const T = LEADER_FINISH_S;
-  const lapLen = { formula: 1050, stock: 900, rally: 1150, baja: 1400, moto: 1000 }[race.tour.vehicle] || 1000;
-  const totalDist = lapLen * race.tour.laps;
-  const paceMps = totalDist / T;
-
   const script = {
-    race, T, lapLen, totalDist, paceMps,
-    grid, finishOrder, finalGap, margin,
+    race, T, lapLen, totalDist, paceMps, pace, pitch,
+    paceSpeed, paceDist, gapScale,
+    shape, upToSpeed, maxAmp,
+    grid, gridSlotOf, finishOrder, finalGap, margin,
     holeshotIdx, fastestLapIdx, fastestLapS,
     gapSec,
-    // Distance along the track in meters at race-time t (seconds). After the
-    // flag (s=1) gaps freeze and everyone cruises home at pace.
+    // Distance along the track in metres at race-time t (seconds), with the
+    // start line at 0. At t=0 every car sits in its grid slot; after the flag
+    // (s=1) gaps freeze and everyone cruises home at pace.
     distance(i, t, adj) {
       const s = clamp(t / T, 0, 1);
-      return paceMps * (t - gapSec(i, s, adj));
+      const tt = Math.max(0, t);
+      return paceDist(tt) - gapSec(i, s, adj) * gapScale(tt) - GRID_OFFSET;
     },
     // Ranked indices at normalized time s (lowest gap = P1).
     standings(s, adj) {
@@ -157,23 +243,39 @@ export function getFocusLayer(race, focusIdx) {
   const impulses = []; // {i, s0, s1, amp}
   const adj = (i, s) => {
     let g = 0;
-    for (const im of impulses) if (im.i === i) g += im.amp * bump(s, im.s0, im.s1);
+    for (const im of impulses) if (im.i === i) g += im.amp * bump(s, im.s0, im.sp, im.s1);
     return g;
   };
 
   const wSelf = race.weights[focusIdx];
   const popups = [];
-  const slots = [0.16 + rand() * 0.08, 0.42 + rand() * 0.1, 0.64 + rand() * 0.08];
+  // Three windows through the race, the first once the field is up to speed.
+  const slots = [Math.max(0.16, script.upToSpeed + 0.05) + rand() * 0.08, 0.42 + rand() * 0.1, 0.64 + rand() * 0.08];
 
   for (let sI = 0; sI < slots.length; sI++) {
     const s0 = slots[sI];
     const order = script.standings(s0, adj);
     const rank = order.indexOf(focusIdx) + 1;
+    // Only offer what the choreography can actually deliver: a surge that
+    // would have to be steeper than the rate limit allows is not on the menu.
     const kinds = [];
-    if (rank > 1) kinds.push('overtake');
-    if (rank > 3) kinds.push('reach');
-    if (rank < n) kinds.push('hold');
-    const kind = kinds[Math.floor(rand() * kinds.length)] || 'hold';
+    if (rank > 1) {
+      const target = order[rank - 2];
+      const gap = script.gapSec(focusIdx, s0, adj) - script.gapSec(target, s0, adj);
+      if ((gap + 0.3) * 1.2 <= script.maxAmp((s0 + Math.min(0.9, s0 + 0.1) + 0.14) / 2)) kinds.push('overtake');
+    }
+    if (rank > 3) {
+      const sm = s0 + 0.11;
+      const need = script.gapSec(focusIdx, sm, adj) - script.gapSec(order[Math.max(1, rank - 2) - 1], sm, adj);
+      if ((need + 0.35) * 1.25 <= script.maxAmp((s0 + Math.min(0.9, s0 + 0.22) + 0.1) / 2)) kinds.push('reach');
+    }
+    if (rank < n) {
+      const chaser = order[rank];
+      const gapBehind = script.gapSec(chaser, s0, adj) - script.gapSec(focusIdx, s0, adj);
+      if ((gapBehind + 0.35) * 1.2 <= script.maxAmp((s0 + Math.min(0.92, Math.min(0.9, s0 + 0.22) + 0.12)) / 2)) kinds.push('hold');
+    }
+    if (!kinds.length) continue; // nothing deliverable from here: no popup this slot
+    const kind = kinds[Math.floor(rand() * kinds.length)];
     const winS = [s0, Math.min(0.9, s0 + (kind === 'overtake' ? 0.1 : 0.22))];
 
     let popup = null;
@@ -183,8 +285,8 @@ export function getFocusLayer(race, focusIdx) {
       const pw = wSelf / (wSelf + race.weights[targetIdx]);
       const p = clamp(0.62 * pw + 0.28 - gapNow * 0.16, 0.07, 0.72);
       const yes = rand() < p;
-      if (yes) impulses.push({ i: focusIdx, s0: winS[0], s1: winS[1] + 0.14, amp: -(gapNow + 0.3) * 1.2 });
-      else impulses.push({ i: focusIdx, s0: winS[0], s1: winS[1], amp: Math.max(0.1, 0.5 - gapNow) });
+      if (yes) impulses.push({ i: focusIdx, ...script.shape(winS[0], winS[1] + 0.14, -(gapNow + 0.3) * 1.2) });
+      else impulses.push({ i: focusIdx, ...script.shape(winS[0], winS[1], Math.max(0.1, 0.5 - gapNow)) });
       popup = {
         kind, p, targetIdx,
         text: (f, t) => `${f.short} to overtake ${t.short} in the next ${Math.round((winS[1] - winS[0]) * T)}s?`,
@@ -198,7 +300,7 @@ export function getFocusLayer(race, focusIdx) {
       if (yes) {
         const sm = (winS[0] + winS[1]) / 2;
         const need = script.gapSec(focusIdx, sm, adj) - script.gapSec(order[targetRank - 1], sm, adj);
-        impulses.push({ i: focusIdx, s0: winS[0], s1: winS[1] + 0.1, amp: -(need + 0.35) * 1.25 });
+        impulses.push({ i: focusIdx, ...script.shape(winS[0], winS[1] + 0.1, -(need + 0.35) * 1.25) });
       }
       popup = {
         kind, p, targetRank,
@@ -210,7 +312,7 @@ export function getFocusLayer(race, focusIdx) {
       if (!yes && rank < n) {
         const chaser = order[rank]; // car directly behind mugs the focus racer
         const gapBehind = script.gapSec(chaser, s0, adj) - script.gapSec(focusIdx, s0, adj);
-        impulses.push({ i: chaser, s0: winS[0], s1: Math.min(0.92, winS[1] + 0.12), amp: -(gapBehind + 0.35) * 1.2 });
+        impulses.push({ i: chaser, ...script.shape(winS[0], Math.min(0.92, winS[1] + 0.12), -(gapBehind + 0.35) * 1.2) });
       }
       popup = {
         kind, p, rankToHold: rank,
