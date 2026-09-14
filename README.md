@@ -108,6 +108,21 @@ exactly to the scripted finish. Five cameras:
 - **Chopper**: aerial follow that climbs as the field spreads out so the
   whole race stays in frame
 
+### The cars
+
+Each tour's vehicle is a real model (`assets/models/*.glb`), built from the
+FBX sources in `assets/fbx-src/` by `npm run models` (a dev-time tool: it
+needs a static server on the repo root and playwright-core with Chromium).
+The sources are single merged meshes with no UVs or material slots, so the
+pipeline recovers parts from geometry: it welds the mesh, splits it into
+connected shells, and classifies each by shape and placement — wheels are
+round and low, wings are thin plates, glazing sits high, tiny bits are trim.
+Wheels become their own nodes pivoted at the axle so they spin; the rest is
+grouped into `primary` and `secondary` bodywork (the team livery), `glass`,
+and `dark`. Every car on track shares the geometry and only carries its two
+livery materials. Paint is physically based with a baked studio reflection,
+each car casts a soft contact shadow, and the bike gets a leaning rider.
+
 Cars don't pass through each other: each carries a collision footprint and a
 separation pass keeps the field apart. It works in track space (offset along
 the track vs. across it) rather than 3D, so it stays cheap even with 40 Baja
@@ -128,7 +143,9 @@ src/engine/schedule.js      the world clock: endless staggered race cycles
 src/engine/odds.js          RTP pricing (Plackett–Luce + seeded Monte Carlo)
 src/engine/script.js        race scripts: outcomes, drama curves, popup director
 src/engine/bets.js          wallet, slip, sponsorships, deterministic settlement
-src/three/                  procedural tracks, low-poly cars, scene, cameras
+src/three/                  procedural tracks, car models, scene, cameras
+assets/models/              game-ready GLBs; assets/fbx-src/ the sources
+tools/                      build, single-file bundle, FBX -> GLB pipeline
 src/ui/                     hub, bet board, live HUD, garage, bet slip, portraits
 sw.js, manifest.webmanifest PWA packaging (fully offline-capable)
 ```

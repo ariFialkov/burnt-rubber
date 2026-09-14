@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { rngFor, clamp, lerp, smoothstep } from '../core/rng.js';
 import { buildTrack } from './trackGen.js';
 import { buildCar, numberSprite, COLLIDERS } from './carFactory.js';
+import { buildModelCar, modelMeta, shadowBlob, eyeFor } from './models.js';
 import { getScript, getFocusLayer } from '../engine/script.js';
 
 const FWD = new THREE.Vector3(0, 0, 1);
@@ -29,7 +30,14 @@ export class RaceScene {
     this.scene.add(sun);
 
     const rand = rngFor('scene-v1', race.key);
-    const colw = (COLLIDERS[race.tour.vehicle] || COLLIDERS.formula).width;
+    // Collision footprint from the real model when it is loaded (a touch
+    // tighter than the visual so door-to-door reads as contact, not a gap),
+    // else the static table for the procedural fallback car.
+    const meta = modelMeta(race.tour.vehicle);
+    this.col = meta
+      ? { len: meta.length * 0.48, width: meta.width * 0.45 }
+      : (COLLIDERS[race.tour.vehicle] || COLLIDERS.formula);
+    const colw = this.col.width;
     // Rank in the finishing order: cars adjacent here are the ones that spend
     // the race in each other's company, so they are what the line spread below
     // needs to keep apart.
@@ -39,13 +47,22 @@ export class RaceScene {
     const laneSpan = Math.max(1, track.width / 2 - colw - 0.5);
     this.laneSpan = laneSpan;
     this.cars = race.field.map((r, i) => {
-      const { group, wheels } = buildCar(race.tour.vehicle, r.colors);
+      const built = buildModelCar(race.tour.vehicle, r.colors) || (() => {
+        const c = buildCar(race.tour.vehicle, r.colors);
+        c.group.add(shadowBlob(this.col.width * 2, this.col.len * 2));
+        return { ...c, meta: null };
+      })();
+      const { group, wheels } = built;
+      const height = built.meta ? built.meta.height : (race.tour.vehicle === 'baja' ? 3.4 : 2.4);
+      const length = built.meta ? built.meta.length : this.col.len * 2;
       const sprite = numberSprite(r.number, race.tour.accent);
-      sprite.position.y = race.tour.vehicle === 'baja' ? 4.4 : 3.4;
+      sprite.position.y = height + 1.0;
       group.add(sprite);
       this.scene.add(group);
+      const eye = eyeFor(race.tour.vehicle, height, length);
       return {
-        group, wheels, sprite,
+        group, wheels, sprite, height, length, eye,
+        glass: group.getObjectByName('glass') || null,
         pos: new THREE.Vector3(),
         tangent: new THREE.Vector3(0, 0, 1),
         dist: 0, speed: 0,
@@ -64,12 +81,20 @@ export class RaceScene {
         trackPos: 0, wantLane: 0,
       };
     });
-    this.col = COLLIDERS[race.tour.vehicle] || COLLIDERS.formula;
     this.order = race.field.map((_, i) => i); // reused each frame, sorted by track position
     this.leaderIdx = 0;
     this.backIdx = 0;
     this.centroid = new THREE.Vector3();
     this.spread = 0;
+  }
+
+  // Cockpit view looks out through the glazing, which is opaque — hide it on
+  // the car being driven and restore it on everything else.
+  setSeeThrough(idx) {
+    for (let i = 0; i < this.cars.length; i++) {
+      const g = this.cars[i].glass;
+      if (g) g.visible = i !== idx;
+    }
   }
 
   setFocus(idx) {
@@ -306,11 +331,11 @@ export class RaceScene {
       const u2 = (((car.dist + 8) / lapLen) % 1 + 1) % 1;
       const tNext = this.track.curve.getTangentAt(u2);
       const turn = Math.atan2(tangent.x * tNext.z - tangent.z * tNext.x, tangent.dot(tNext));
-      if (vehicle === 'moto') car.group.rotateZ(clamp(turn * 6, -0.8, 0.8));
+      if (vehicle === 'moto') car.group.rotateZ(clamp(turn * 4.5, -0.6, 0.6));
       else if (vehicle === 'rally' || vehicle === 'baja') car.group.rotateY(clamp(turn * 2.4, -0.5, 0.5));
       else car.group.rotateZ(clamp(turn * 1.2, -0.18, 0.18));
 
-      for (const w of car.wheels) w.rotation.x -= (car.speed * dt) / 0.45;
+      for (const w of car.wheels) w.rotation.x -= (car.speed * dt) / (w.userData.radius || 0.45);
     }
 
     if (mode === 'race') {

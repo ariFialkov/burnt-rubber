@@ -45,9 +45,10 @@ function transform(file) {
     return `const ${ns} = __req('three');`;
   });
 
-  // import { a, b as c } from './x.js'
-  src = src.replace(/import \{([\s\S]*?)\} from ['"](\.[^'"]+)['"];?/g, (_, names, spec) => {
-    const key = KEY(resolve(dir, spec));
+  // import { a, b as c } from './x.js'  |  from 'three'
+  src = src.replace(/import \{([\s\S]*?)\} from ['"]([^'"]+)['"];?/g, (_, names, spec) => {
+    const key = spec === 'three' ? 'three' : KEY(resolve(dir, spec));
+    if (spec !== 'three' && !spec.startsWith('.')) throw new Error(`bare import '${spec}' in ${file}`);
     deps.push(key);
     const binds = names.split(',').map((s) => s.trim()).filter(Boolean)
       .map((s) => { const p = s.split(/\s+as\s+/); return p[1] ? `${p[0]}: ${p[1]}` : p[0]; })
@@ -67,12 +68,22 @@ function transform(file) {
     exported.add(name);
     return `${a || ''}${kind} ${name}`;
   });
+  src = src.replace(/^export \{([\s\S]*?)\};?/gm, (_, names) => {
+    for (const n of names.split(',').map((x) => x.trim()).filter(Boolean)) {
+      const p = n.split(/\s+as\s+/);
+      exported.add(p[1] ? `${p[1]}: ${p[0]}` : p[0]);
+    }
+    return '';
+  });
   if (/^export\b/m.test(src)) throw new Error(`unhandled export form in ${file}`);
 
   const assign = exported.size
     ? `\nObject.assign(__x, { ${[...exported].join(', ')} });`
     : '';
-  return { key: KEY(file), deps: [...new Set(deps)], code: `__def(${JSON.stringify(KEY(file))}, function (__x, __req) {\n${src}${assign}\n});` };
+  // The entry module awaits the car models at top level, which only works
+  // inside an async wrapper; nothing imports from it, so that is safe.
+  const fn = KEY(file) === 'main.js' ? 'async function' : 'function';
+  return { key: KEY(file), deps: [...new Set(deps)], code: `__def(${JSON.stringify(KEY(file))}, ${fn} (__x, __req) {\n${src}${assign}\n});` };
 }
 
 const FILES = [
@@ -80,7 +91,9 @@ const FILES = [
   'src/engine/schedule.js', 'src/engine/odds.js', 'src/engine/script.js', 'src/engine/bets.js',
   'src/three/trackGen.js', 'src/three/carFactory.js', 'src/three/scene.js', 'src/three/cameras.js',
   'src/ui/avatars.js', 'src/ui/hub.js', 'src/ui/slip.js', 'src/ui/board.js', 'src/ui/live.js',
-  'src/ui/garage.js', 'src/ui/mybets.js', 'src/ui/tickets.js', 'src/main.js',
+  'src/ui/garage.js', 'src/ui/mybets.js', 'src/ui/tickets.js', 'src/three/models.js', 'src/main.js',
+  'vendor/jsm/loaders/GLTFLoader.js', 'vendor/jsm/utils/BufferGeometryUtils.js',
+  'vendor/jsm/environments/RoomEnvironment.js',
 ];
 
 const mods = FILES.map(transform);
@@ -107,11 +120,20 @@ const bodyMatch = html.match(/<body>([\s\S]*?)<script type="module"/);
 if (!bodyMatch) throw new Error('could not extract body markup');
 const markup = bodyMatch[1].trim();
 
+import { readdirSync } from 'node:fs';
+const models = {};
+for (const f of readdirSync(resolve(ROOT, 'assets/models'))) {
+  if (f.endsWith('.glb')) models[f.replace('.glb', '')] = readFileSync(resolve(ROOT, 'assets/models', f)).toString('base64');
+}
+
 const bundle = `<title>Burnt Rubber</title>
 <style>
 ${read('styles.css')}
 </style>
 ${markup}
+<script>
+window.__BR_MODELS__ = ${JSON.stringify(models)};
+<\/script>
 <script>
 "use strict";
 (function () {

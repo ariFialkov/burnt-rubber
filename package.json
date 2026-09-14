@@ -7,6 +7,7 @@
   "scripts": {
     "start": "python3 -m http.server 8000",
     "build": "node tools/build.mjs",
-    "build:single": "node tools/bundle.mjs"
+    "build:single": "node tools/bundle.mjs",
+    "models": "node tools/convert-models.mjs"
   }
 }

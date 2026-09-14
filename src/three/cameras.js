@@ -41,17 +41,24 @@ export class CameraRig {
     let pos = this.posTarget, look = this.lookTarget, fov = 60;
     let stiff = 6;
 
+    const h = car.height || 2.2, len = car.length || 4.8;
+    const eye = car.eye || { y: h * 0.75, z: len * 0.05 };
+    const followed = clamp(this.carIdx, 0, rs.cars.length - 1);
+    const onboard = this.mode === 'chase' || this.mode === 'cockpit' || this.mode === 'hood';
+    rs.setSeeThrough?.(this.mode === 'cockpit' ? followed : -1);
+    // The followed car's own number board would sit right in the lens.
+    for (let i = 0; i < rs.cars.length; i++) rs.cars[i].sprite.visible = !(onboard && i === followed);
     if (this.mode === 'chase') {
-      pos = car.pos.clone().addScaledVector(car.tangent, -9).addScaledVector(up, 3.6);
-      look = car.pos.clone().addScaledVector(car.tangent, 10).addScaledVector(up, 1.2);
+      pos = car.pos.clone().addScaledVector(car.tangent, -(3.5 + len * 0.95)).addScaledVector(up, 1.3 + h * 0.95);
+      look = car.pos.clone().addScaledVector(car.tangent, 7).addScaledVector(up, h * 0.55);
       fov = 62; stiff = 8;
     } else if (this.mode === 'cockpit') {
-      pos = car.pos.clone().addScaledVector(car.tangent, 0.3).addScaledVector(up, 1.5);
-      look = car.pos.clone().addScaledVector(car.tangent, 40).addScaledVector(up, 1.2);
+      pos = car.pos.clone().addScaledVector(car.tangent, eye.z).addScaledVector(up, eye.y);
+      look = car.pos.clone().addScaledVector(car.tangent, 40).addScaledVector(up, eye.y * 0.8);
       fov = 74; stiff = 30;
     } else if (this.mode === 'hood') {
-      pos = car.pos.clone().addScaledVector(car.tangent, 2.2).addScaledVector(up, 1.6);
-      look = car.pos.clone().addScaledVector(car.tangent, -40).addScaledVector(up, 1.6);
+      pos = car.pos.clone().addScaledVector(car.tangent, len * 0.42).addScaledVector(up, h * 0.75);
+      look = car.pos.clone().addScaledVector(car.tangent, -40).addScaledVector(up, h * 0.7);
       fov = 68; stiff = 30;
     } else if (this.mode === 'cine') {
       this.updateCine(rs, leader);

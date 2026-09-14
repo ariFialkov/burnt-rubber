@@ -23,7 +23,7 @@ rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
 // Directories that ship verbatim.
-for (const dir of ['src', 'vendor', 'icons']) {
+for (const dir of ['src', 'vendor', 'icons', 'assets/models']) {
   cpSync(resolve(ROOT, dir), join(OUT, dir), { recursive: true });
 }
 

@@ -7,6 +7,8 @@ import { getScript } from './engine/script.js';
 import { store, settleDue, topUpIfBroke, focusRacerIdx } from './engine/bets.js';
 import { RaceScene } from './three/scene.js';
 import { CameraRig } from './three/cameras.js';
+import { loadCarModels, setCarEnvironment } from './three/models.js';
+import { RoomEnvironment } from '../vendor/jsm/environments/RoomEnvironment.js';
 import { initHub, updateHub } from './ui/hub.js';
 import { initBoard, updateBoard, invalidateBoard } from './ui/board.js';
 import { initSlip, renderSlip } from './ui/slip.js';
@@ -22,7 +24,16 @@ const $ = (id) => document.getElementById(id);
 const canvas = $('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.25;
 const rig = new CameraRig(innerWidth / innerHeight);
+
+// Reflections for car paint: a neutral studio room, baked once.
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  setCarEnvironment(pmrem.fromScene(new RoomEnvironment(), 0.04).texture);
+  pmrem.dispose();
+}
 
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
@@ -122,6 +133,14 @@ if (topUpIfBroke()) toast('Welcome bonus: +10,000 ◈', 'win');
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// --- Load the cars, then go live ------------------------------------------
+$('chyron-title').textContent = 'WARMING UP THE GRID…';
+try {
+  await loadCarModels();
+} catch (e) {
+  console.warn('car models unavailable, using procedural cars', e);
 }
 
 // --- Main loop --------------------------------------------------------------

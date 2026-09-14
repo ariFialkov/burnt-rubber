@@ -1,0 +1,209 @@
+<!doctype html>
+<!--
+  Model pipeline: FBX source -> game-ready GLB.
+
+  The source files are single merged meshes with no UVs or sub-materials, so
+  parts are recovered from geometry: the mesh is welded by position and split
+  into connected shells, and each shell is classified by shape and placement
+  (wheels are round and low, wings are thin plates, glass sits high, tiny
+  bits are trim). Wheels become their own nodes with pivots at the axle so
+  they can spin. Everything is normalised: nose to +Z, floor at y=0, centred,
+  scaled to the vehicle's real length.
+
+  Driven headlessly by tools/convert-models.mjs; results land in
+  window.__glb (base64 GLBs), window.__shots (preview renders), window.__meta.
+-->
+<meta charset="utf-8">
+<canvas id="c" width="900" height="600"></canvas>
+<pre id="out">working…</pre>
+<script type="importmap">{ "imports": { "three": "../vendor/three.module.js" } }</script>
+<script type="module">
+  import * as THREE from 'three';
+  import { FBXLoader } from '../vendor/jsm/loaders/FBXLoader.js';
+  import { GLTFExporter } from '../vendor/jsm/exporters/GLTFExporter.js';
+  import * as BGU from '../vendor/jsm/utils/BufferGeometryUtils.js';
+  import { RoomEnvironment } from '../vendor/jsm/environments/RoomEnvironment.js';
+
+  // Real-world lengths (m). Colliders and camera offsets derive from these.
+  const VEHICLES = {
+    formula: { file: 'formula_car.fbx', length: 5.0 },
+    stock:   { file: 'nascar_car.fbx',  length: 5.2 },
+    rally:   { file: 'rally_car.fbx',   length: 4.4 },
+    baja:    { file: 'baja_car.fbx',    length: 5.2 },
+    moto:    { file: 'moto_car.fbx',    length: 2.2, wheels: 2 },
+  };
+
+  // Connected shells of a non-indexed triangle soup, by position only.
+  function splitShells(geo) {
+    const bare = new THREE.BufferGeometry();
+    bare.setAttribute('position', geo.attributes.position.clone());
+    const welded = BGU.mergeVertices(bare, 1e-4);
+    const map = welded.index.array; // original vertex -> welded vertex
+    const nV = welded.attributes.position.count;
+    const parent = new Int32Array(nV);
+    for (let i = 0; i < nV; i++) parent[i] = i;
+    const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+    const union = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[a] = b; };
+    const triCount = geo.attributes.position.count / 3;
+    for (let t = 0; t < triCount; t++) { union(map[3 * t], map[3 * t + 1]); union(map[3 * t + 1], map[3 * t + 2]); }
+    const shells = new Map();
+    const pos = geo.attributes.position;
+    const v = new THREE.Vector3();
+    for (let t = 0; t < triCount; t++) {
+      const r = find(map[3 * t]);
+      let s = shells.get(r);
+      if (!s) { s = { tris: [], box: new THREE.Box3() }; shells.set(r, s); }
+      s.tris.push(t);
+      for (let k = 0; k < 3; k++) s.box.expandByPoint(v.fromBufferAttribute(pos, 3 * t + k));
+    }
+    return [...shells.values()].map((s) => ({
+      tris: s.tris, box: s.box,
+      size: s.box.getSize(new THREE.Vector3()),
+      center: s.box.getCenter(new THREE.Vector3()),
+    })).sort((a, b) => b.tris.length - a.tris.length);
+  }
+
+  // Gather the triangles of several shells into one geometry (indexed).
+  function gather(geo, shellList, offset) {
+    const pos = geo.attributes.position.array, nor = geo.attributes.normal.array;
+    const n = shellList.reduce((a, s) => a + s.tris.length, 0) * 9;
+    const p = new Float32Array(n), q = new Float32Array(n);
+    let w = 0;
+    for (const s of shellList) for (const t of s.tris) {
+      for (let k = 0; k < 9; k++) {
+        p[w + k] = pos[9 * t + k] - (offset ? offset.getComponent(k % 3) : 0);
+        q[w + k] = nor[9 * t + k];
+      }
+      w += 9;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(q, 3));
+    return BGU.mergeVertices(g, 1e-4);
+  }
+
+  function classify(shells, model, wheelCount) {
+    const L = model.z, H = model.y;
+    const roles = new Map();
+    const isRound = (s) => {
+      const d = [s.size.x, s.size.y, s.size.z].sort((a, b) => a - b);
+      return d[1] > 0 && d[2] / d[1] < 1.25 && d[0] / d[1] < 0.7;
+    };
+    // Wheels: round in the length/height plane, low, big enough to matter.
+    // Width is allowed up to 85% of the diameter — F1 rears and truck tyres
+    // are fat, and were being taken for body panels.
+    const wheelish = shells.filter((s) =>
+      s.tris.length >= 60 && Math.abs(s.size.y - s.size.z) / Math.max(s.size.y, s.size.z) < 0.25 &&
+      s.size.x < s.size.y * 0.85 && s.size.x > s.size.y * 0.15 &&
+      s.center.y < H * 0.45 && s.size.y > L * 0.1);
+    wheelish.sort((a, b) => b.size.y - a.size.y);
+    const wheels = wheelish.slice(0, wheelCount);
+    wheels.forEach((s) => roles.set(s, 'wheel'));
+
+    shells.forEach((s, i) => {
+      if (roles.has(s)) return;
+      const d = [s.size.x, s.size.y, s.size.z];
+      const mx = Math.max(...d), mn = Math.min(...d);
+      if (i === 0) roles.set(s, 'primary');                                    // the body
+      else if (s.tris.length < 30) roles.set(s, 'dark');                        // bolts, lamps, antennae
+      else if (wheelCount === 2 && isRound(s) && s.center.y > H * 0.6) roles.set(s, 'secondary'); // helmet-like (bikes only; a truck's spare sits high too)
+      else if (isRound(s)) roles.set(s, 'dark');                                // spare tyres, drums
+      else if (mn / mx < 0.18) roles.set(s, 'secondary');                       // wings, spoilers, plates
+      else if (s.center.y > H * 0.62) roles.set(s, 'glass');                    // cabin glazing
+      else roles.set(s, 'primary');
+    });
+    return { roles, wheels };
+  }
+
+  const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x2b2f37);
+  scene.environment = env;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 0.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(3, 6, 4); scene.add(sun);
+  const cam = new THREE.PerspectiveCamera(38, 1.5, 0.05, 100);
+  const PALETTE = {
+    primary: new THREE.MeshStandardMaterial({ color: 0xe10600, metalness: 0.3, roughness: 0.35 }),
+    secondary: new THREE.MeshStandardMaterial({ color: 0xf2f2f2, metalness: 0.3, roughness: 0.4 }),
+    glass: new THREE.MeshStandardMaterial({ color: 0x101820, metalness: 0.6, roughness: 0.15 }),
+    dark: new THREE.MeshStandardMaterial({ color: 0x24272d, metalness: 0.2, roughness: 0.7 }),
+    wheel: new THREE.MeshStandardMaterial({ color: 0x15171a, metalness: 0.1, roughness: 0.85 }),
+  };
+
+  const out = {}, shots = {}, meta = {};
+  for (const [vehicle, cfg] of Object.entries(VEHICLES)) {
+    const obj = await new FBXLoader().loadAsync(`../assets/fbx-src/${cfg.file}`);
+    let src = null;
+    obj.traverse((o) => { if (o.isMesh) src = o; });
+    src.updateWorldMatrix(true, false);
+
+    // World space (Y up, length on X), then nose to +Z, then scale to metres.
+    const geo = src.geometry.clone().applyMatrix4(src.matrixWorld);
+    geo.rotateY(Math.PI / 2); // -X (nose) -> +Z
+    let box = new THREE.Box3().setFromBufferAttribute(geo.attributes.position);
+    let size = box.getSize(new THREE.Vector3());
+    geo.scale(cfg.length / size.z, cfg.length / size.z, cfg.length / size.z);
+    box = new THREE.Box3().setFromBufferAttribute(geo.attributes.position);
+    size = box.getSize(new THREE.Vector3());
+    const c = box.getCenter(new THREE.Vector3());
+    geo.translate(-c.x, -box.min.y, -c.z);
+    geo.computeVertexNormals(); // scale/rotate are uniform, but be safe
+
+    const shells = splitShells(geo);
+    const { roles, wheels } = classify(shells, size, cfg.wheels || 4);
+
+    const root = new THREE.Group();
+    root.name = vehicle;
+    const byRole = {};
+    for (const s of shells) {
+      const r = roles.get(s);
+      if (r === 'wheel') continue;
+      (byRole[r] = byRole[r] || []).push(s);
+    }
+    const partTris = {};
+    for (const [r, list] of Object.entries(byRole)) {
+      const m = new THREE.Mesh(gather(geo, list), PALETTE[r]);
+      m.name = r;
+      root.add(m);
+      partTris[r] = list.reduce((a, s) => a + s.tris.length, 0);
+    }
+    let wheelRadius = 0;
+    wheels.forEach((s, i) => {
+      const centre = s.box.getCenter(new THREE.Vector3());
+      const m = new THREE.Mesh(gather(geo, [s], centre), PALETTE.wheel);
+      m.name = `wheel_${i}`;
+      m.position.copy(centre);
+      root.add(m);
+      wheelRadius = Math.max(wheelRadius, s.size.y / 2);
+    });
+    root.userData = {
+      vehicle, length: +size.z.toFixed(3), width: +size.x.toFixed(3), height: +size.y.toFixed(3),
+      wheelRadius: +wheelRadius.toFixed(3), wheels: wheels.length,
+    };
+    meta[vehicle] = { ...root.userData, shells: shells.length, parts: partTris,
+      wheelCentres: wheels.map((s) => s.box.getCenter(new THREE.Vector3()).toArray().map((v) => +v.toFixed(2))) };
+
+    // Preview renders with the test livery.
+    if (window.__prev) scene.remove(window.__prev);
+    window.__prev = root;
+    scene.add(root);
+    const L = size.z;
+    shots[vehicle] = {};
+    for (const [k, p] of Object.entries({ threeq: [L * 1.1, L * 0.7, L * 1.3], rear: [L * 0.9, L * 0.6, -L * 1.3], side: [L * 1.9, L * 0.4, 0] })) {
+      cam.position.set(...p); cam.lookAt(0, size.y * 0.4, 0); cam.updateProjectionMatrix();
+      renderer.render(scene, cam);
+      shots[vehicle][k] = renderer.domElement.toDataURL('image/png');
+    }
+
+    const glb = await new GLTFExporter().parseAsync(root, { binary: true });
+    const bytes = new Uint8Array(glb);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    out[vehicle] = btoa(bin);
+  }
+  document.getElementById('out').textContent = JSON.stringify(meta, null, 2);
+  window.__meta = meta; window.__glb = out; window.__shots = shots;
+</script>
