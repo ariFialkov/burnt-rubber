@@ -2,7 +2,7 @@
 // the freshly deployed build, offline the cached copy plays fully (the whole
 // game is static and deterministic — races run off the world clock).
 
-const CACHE = 'burnt-rubber-v4';
+const CACHE = 'burnt-rubber-v5';
 const ASSETS = [
   '.',
   'index.html',
@@ -43,6 +43,21 @@ const ASSETS = [
   'assets/models/baja.glb',
   'assets/models/moto.glb',
   'assets/liveries/index.json',
+  'assets/liveries/formula.jpg',
+  'assets/liveries/formula_normal.jpg',
+  'assets/liveries/formula_rm.jpg',
+  'assets/liveries/stock.jpg',
+  'assets/liveries/stock_normal.jpg',
+  'assets/liveries/stock_rm.jpg',
+  'assets/liveries/rally.jpg',
+  'assets/liveries/rally_normal.jpg',
+  'assets/liveries/rally_rm.jpg',
+  'assets/liveries/baja.jpg',
+  'assets/liveries/baja_normal.jpg',
+  'assets/liveries/baja_rm.jpg',
+  'assets/liveries/moto.jpg',
+  'assets/liveries/moto_normal.jpg',
+  'assets/liveries/moto_rm.jpg',
 ];
 
 self.addEventListener('install', (e) => {

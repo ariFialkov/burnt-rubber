@@ -52,12 +52,17 @@ jobs:
         if: steps.check.outputs.ready == 'true'
         uses: actions/configure-pages@v5
 
+      - name: Build site
+        # Assemble build/ so the model sources (tens of MB of FBX/PNG that the
+        # game never loads) stay out of the deployed site.
+        if: steps.check.outputs.ready == 'true'
+        run: node tools/build.mjs
+
       - name: Upload site
-        # The game is fully static — the repo root is the site.
         if: steps.check.outputs.ready == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: build
 
       - name: Deploy
         id: deployment

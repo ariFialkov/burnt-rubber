@@ -111,10 +111,10 @@ exactly to the scripted finish. Five cameras:
 ### The cars
 
 Each tour's vehicle is a real model (`assets/models/*.glb`), built from the
-FBX sources in `assets/fbx-src/` by `npm run models` (a dev-time tool: it
-needs a static server on the repo root and playwright-core with Chromium).
-The sources are single merged meshes with no UVs or material slots, so the
-pipeline recovers parts from geometry: it welds the mesh, splits it into
+textured FBX sources in `assets/fbx-src/` by `npm run models` (a dev-time
+tool: it needs a static server on the repo root and playwright-core with
+Chromium). The sources are single merged meshes, so the pipeline recovers
+parts from geometry: it welds the mesh, splits it into
 connected shells, and classifies each by shape and placement — wheels are
 round and low, wings are thin plates, glazing sits high, tiny bits are trim.
 Wheels become their own nodes pivoted at the axle so they spin; the rest is
@@ -123,16 +123,15 @@ and `dark`. Every car on track shares the geometry and only carries its two
 livery materials. Paint is physically based with a baked studio reflection,
 each car casts a soft contact shadow, and the bike gets a leaning rider.
 
-**Liveries.** Drop one painted atlas per vehicle into `assets/liveries/`
-(`formula.png`, `stock.png`, `rally.png`, `baja.png`, `moto.png`) and every
-car of that type is textured with it. Each team still gets its own palette:
-the shader finds the atlas's two accent hues and remaps pixels near them to
-the team's primary and secondary colours, keeping the baked shading, decals,
-numbers, whites and blacks exactly as painted. This needs the model to carry
-UV coordinates — the converter keeps them when the source has them and
-records `hasUV` in the GLB; a model without UVs keeps the flat role paint.
-The current FBX sources have no UV layer, so re-export the same meshes with
-UVs (a `.glb` with the texture embedded is ideal) and re-run `npm run models`.
+**Liveries.** Every car is textured with its vehicle's painted PBR atlas
+(`assets/liveries/`: base colour and normal at 1024², roughness and
+metalness packed into one 512² map), baked by `npm run models` from the
+textures embedded in the FBX sources. Each team still gets its own palette:
+the shader finds the atlas's two accent hues — weighted by how much of the
+car's actual surface they cover — and remaps pixels near them to the team's
+primary and secondary colours, keeping the baked shading, decals, numbers,
+whites and blacks exactly as painted. A model without UVs would keep the
+flat role paint instead.
 
 Cars don't pass through each other: each carries a collision footprint and a
 separation pass keeps the field apart. It works in track space (offset along

@@ -2,3 +2,6 @@ node_modules/
 .DS_Store
 dist/
 build/
+# base colour + normal sources are embedded in the *_tex.fbx files
+assets/fbx-src/tex/*_basecolor.png
+assets/fbx-src/tex/*_normal.png

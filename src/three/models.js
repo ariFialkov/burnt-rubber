@@ -22,16 +22,12 @@ const templates = new Map(); // vehicle -> { meta, parts: {role: geometry}, whee
 const liveries = new Map();  // vehicle -> { texture, accents: [hue, hue] }
 let envMap = null;
 
-// Livery atlases. One painted template per vehicle; each team gets its own
-// palette by remapping the template's accent hues in the shader, so the
-// painted shapes, numbers and shading stay and only the colours change.
-export const LIVERY_FILES = {
-  formula: 'assets/liveries/formula.png',
-  stock: 'assets/liveries/stock.png',
-  rally: 'assets/liveries/rally.png',
-  baja: 'assets/liveries/baja.png',
-  moto: 'assets/liveries/moto.png',
-};
+// Livery atlases. One painted template per vehicle (base colour, normal,
+// and roughness/metalness packed G/B); each team gets its own palette by
+// remapping the template's accent hues in the shader, so the painted shapes,
+// numbers and shading stay and only the colours change.
+export const LIVERY_DIR = 'assets/liveries/';
+export const LIVERY_VEHICLES = ['formula', 'stock', 'rally', 'baja', 'moto'];
 
 // Shared, look-alike materials: one each for the whole field.
 const SHARED = {
@@ -86,53 +82,105 @@ export async function loadCarModels(inline = globalThis.__BR_MODELS__) {
 export const hasModel = (vehicle) => templates.has(vehicle);
 export const hasLivery = (vehicle) => liveries.has(vehicle) && !!templates.get(vehicle)?.meta.hasUV;
 
-// The two most common saturated hues in an atlas are its accent colours —
-// what a team's primary and secondary replace.
-function accentHues(image) {
+// The two most common saturated hues *on the car's surface* are its accent
+// colours — what a team's primary and secondary replace. Weighting by
+// surface area matters: an atlas can spend more texels on a colour that
+// covers little of the actual body (the truck's blue vs its orange), so the
+// histogram samples each triangle at its UV centroid, weighted by 3D area.
+// Without geometry it falls back to a plain texel histogram.
+function accentHues(image, geometries) {
   const c = document.createElement('canvas');
-  const w = c.width = 128, h = c.height = 128;
+  const w = c.width = 256, h = c.height = 256;
   const g = c.getContext('2d');
   g.drawImage(image, 0, 0, w, h);
   const d = g.getImageData(0, 0, w, h).data;
   const bins = new Float32Array(36);
-  for (let i = 0; i < d.length; i += 4) {
+  const tally = (i, weight) => {
     const r = d[i] / 255, gg = d[i + 1] / 255, b = d[i + 2] / 255;
     const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
     const sat = mx > 0 ? (mx - mn) / mx : 0;
-    if (sat < 0.35 || mx < 0.15) continue; // neutrals never count
+    if (sat < 0.35 || mx < 0.15) return; // neutrals never count
     let hue;
     if (mx === r) hue = ((gg - b) / (mx - mn) + 6) % 6;
     else if (mx === gg) hue = (b - r) / (mx - mn) + 2;
     else hue = (r - gg) / (mx - mn) + 4;
-    bins[Math.floor(hue * 6) % 36] += sat;
+    bins[Math.floor(hue * 6) % 36] += sat * weight;
+  };
+  const withUV = geometries?.filter((geo) => geo.attributes.uv);
+  if (withUV?.length) {
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), cc = new THREE.Vector3();
+    for (const geo of withUV) {
+      const pos = geo.attributes.position, uv = geo.attributes.uv, idx = geo.index;
+      const n = idx ? idx.count : pos.count;
+      for (let t = 0; t < n; t += 3) {
+        const i0 = idx ? idx.getX(t) : t, i1 = idx ? idx.getX(t + 1) : t + 1, i2 = idx ? idx.getX(t + 2) : t + 2;
+        a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); cc.fromBufferAttribute(pos, i2);
+        const nrm = b.sub(a).cross(cc.sub(a));
+        const area = nrm.length() * 0.5;
+        // Undersides and chassis are never what a livery reads as — a face
+        // pointing at the road doesn't vote.
+        if (area > 0 && nrm.y / (area * 2) < -0.35) continue;
+        const u = (uv.getX(i0) + uv.getX(i1) + uv.getX(i2)) / 3;
+        const v = (uv.getY(i0) + uv.getY(i1) + uv.getY(i2)) / 3;
+        // texture flipY: v=0 is the bottom row of the image
+        const px = Math.min(w - 1, Math.max(0, Math.floor(u * w)));
+        const py = Math.min(h - 1, Math.max(0, Math.floor((1 - v) * h)));
+        tally((py * w + px) * 4, area);
+      }
+    }
+  } else {
+    for (let i = 0; i < d.length; i += 4) tally(i, 1);
   }
   const order = [...bins.keys()].sort((a, b) => bins[b] - bins[a]);
   const first = order[0];
   // second accent must be a genuinely different hue (> 60° away)
   const second = order.find((k) => Math.min(Math.abs(k - first), 36 - Math.abs(k - first)) > 6);
   const toHue = (k) => (k + 0.5) / 36;
-  return [toHue(first), second === undefined ? -1 : toHue(second)];
+  const strong = second !== undefined && bins[second] >= bins[first] * 0.12;
+  return [toHue(first), strong ? toHue(second) : -1];
 }
 
 // Loads whatever assets/liveries/index.json lists (kept in sync by
 // `npm run models`), so a vehicle without an atlas costs no request at all.
+// `inline` (vehicle -> {base, normal, rm} data URLs) serves the single-file
+// bundle, which cannot fetch.
 export async function loadLiveries(inline = globalThis.__BR_LIVERIES__) {
   const loader = new THREE.TextureLoader();
   let available;
   if (inline) available = Object.keys(inline);
   else {
-    try { available = await (await fetch('assets/liveries/index.json')).json(); } catch { available = []; }
+    try { available = await (await fetch(LIVERY_DIR + 'index.json')).json(); } catch { available = []; }
   }
-  await Promise.all(available.filter((v) => LIVERY_FILES[v]).map(async (vehicle) => {
-    const url = LIVERY_FILES[vehicle];
+  const load = async (url, srgb) => {
+    if (!url) return null;
+    const t = await loader.loadAsync(url);
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    // The models' UVs came straight through from FBX (origin bottom-left),
+    // which is three's own convention: leave flipY on.
+    t.flipY = true;
+    t.anisotropy = 4;
+    return t;
+  };
+  await Promise.all(available.filter((v) => LIVERY_VEHICLES.includes(v)).map(async (vehicle) => {
+    const src = inline?.[vehicle] || { base: `${LIVERY_DIR}${vehicle}.jpg`, normal: `${LIVERY_DIR}${vehicle}_normal.jpg`, rm: `${LIVERY_DIR}${vehicle}_rm.jpg` };
     try {
-      const tex = await loader.loadAsync(inline && inline[vehicle] ? inline[vehicle] : url);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.flipY = false; // glTF convention, matching the converted models
-      tex.anisotropy = 4;
-      liveries.set(vehicle, { texture: tex, accents: accentHues(tex.image) });
+      const base = await load(src.base, true);
+      const [normal, rm] = await Promise.all([load(src.normal, false).catch(() => null), load(src.rm, false).catch(() => null)]);
+      liveries.set(vehicle, { base, normal, rm, accents: null });
     } catch { /* no livery for this vehicle */ }
   }));
+}
+
+// Compute (or recompute) a vehicle's accent hues against its real surface.
+// Called once models and liveries are both in; the geometries default to the
+// loaded template's body parts.
+export function refreshAccents(vehicle, geometries) {
+  const l = liveries.get(vehicle);
+  if (!l) return null;
+  const t = templates.get(vehicle);
+  const geos = geometries || (t ? Object.values(t.parts) : null);
+  l.accents = accentHues(l.base.image, geos);
+  return l.accents;
 }
 
 // Paint material driven by the atlas: pixels near an accent hue are recoloured
@@ -161,7 +209,14 @@ const RECOLOR = `
 export function liveryMaterial(vehicle, colors) {
   const l = liveries.get(vehicle);
   if (!l) return null;
-  const m = new THREE.MeshStandardMaterial({ map: l.texture, metalness: 0.25, roughness: 0.4, envMap });
+  if (!l.accents) refreshAccents(vehicle);
+  const m = new THREE.MeshStandardMaterial({
+    map: l.base,
+    normalMap: l.normal || null, normalScale: new THREE.Vector2(0.8, 0.8),
+    roughnessMap: l.rm || null, metalnessMap: l.rm || null,
+    roughness: l.rm ? 1 : 0.4, metalness: l.rm ? 1 : 0.25,
+    envMap,
+  });
   const u = {
     uPrimHue: { value: l.accents[0] }, uSecHue: { value: l.accents[1] },
     uPrim: { value: new THREE.Color(colors[0]) }, uSec: { value: new THREE.Color(colors[1]) },

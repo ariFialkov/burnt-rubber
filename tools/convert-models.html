@@ -1,17 +1,23 @@
 <!doctype html>
 <!--
-  Model pipeline: FBX source -> game-ready GLB.
+  Model pipeline: textured FBX source -> game-ready GLB + livery textures.
 
-  The source files are single merged meshes with no UVs or sub-materials, so
-  parts are recovered from geometry: the mesh is welded by position and split
-  into connected shells, and each shell is classified by shape and placement
-  (wheels are round and low, wings are thin plates, glass sits high, tiny
-  bits are trim). Wheels become their own nodes with pivots at the axle so
-  they can spin. Everything is normalised: nose to +Z, floor at y=0, centred,
-  scaled to the vehicle's real length.
+  The sources are single merged meshes, so parts are recovered from geometry:
+  the mesh is welded by position and split into connected shells, and each
+  shell is classified by shape and placement (wheels are round and low, wings
+  are thin plates, glass sits high, tiny bits are trim). Wheels become their
+  own nodes with pivots at the axle so they can spin. Everything is
+  normalised: nose to +Z, floor at y=0, centred, scaled to real length. UVs
+  ride through untouched.
 
-  Driven headlessly by tools/convert-models.mjs; results land in
-  window.__glb (base64 GLBs), window.__shots (preview renders), window.__meta.
+  Textures: base colour and normal come embedded in the FBX; roughness and
+  metallic sit beside it. They are resampled to shippable sizes — 1024 for
+  base and normal, and roughness (G) + metalness (B) packed into one 512 map
+  the way glTF does it.
+
+  Driven headlessly by tools/convert-models.mjs; results land in window.__glb
+  (base64 GLBs), window.__tex (data-URL textures), window.__shots (preview
+  renders), window.__meta.
 -->
 <meta charset="utf-8">
 <canvas id="c" width="900" height="600"></canvas>
@@ -27,12 +33,36 @@
 
   // Real-world lengths (m). Colliders and camera offsets derive from these.
   const VEHICLES = {
-    formula: { file: 'formula_car.fbx', length: 5.0 },
-    stock:   { file: 'nascar_car.fbx',  length: 5.2 },
-    rally:   { file: 'rally_car.fbx',   length: 4.4 },
-    baja:    { file: 'baja_car.fbx',    length: 5.2 },
-    moto:    { file: 'moto_car.fbx',    length: 2.2, wheels: 2 },
+    formula: { file: 'formula_tex.fbx', length: 5.0 },
+    stock:   { file: 'stock_tex.fbx',   length: 5.2 },
+    rally:   { file: 'rally_tex.fbx',   length: 4.4 },
+    baja:    { file: 'baja_tex.fbx',    length: 5.2 },
+    moto:    { file: 'moto_tex.fbx',    length: 2.2, wheels: 2 },
   };
+
+  // Resample an image to size and encode. JPEG for everything: the recolour
+  // keys on hue, which survives chroma subsampling at this quality.
+  function bake(image, size, quality = 0.9) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(image, 0, 0, size, size);
+    return c.toDataURL('image/jpeg', quality);
+  }
+  // Roughness -> G, metalness -> B (glTF metallicRoughness packing).
+  function packRM(rough, metal, size) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+    const read = (img) => { const t = document.createElement('canvas'); t.width = t.height = size; const tg = t.getContext('2d'); tg.drawImage(img, 0, 0, size, size); return tg.getImageData(0, 0, size, size).data; };
+    const r = read(rough), m = read(metal);
+    const out = g.createImageData(size, size);
+    for (let i = 0; i < out.data.length; i += 4) { out.data[i] = 255; out.data[i + 1] = r[i]; out.data[i + 2] = m[i]; out.data[i + 3] = 255; }
+    g.putImageData(out, 0, 0);
+    return c.toDataURL('image/jpeg', 0.85);
+  }
+  const loadImage = (url) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
 
   // Connected shells of a non-indexed triangle soup, by position only.
   function splitShells(geo) {
@@ -138,12 +168,30 @@
     wheel: new THREE.MeshStandardMaterial({ color: 0x15171a, metalness: 0.1, roughness: 0.85 }),
   };
 
-  const out = {}, shots = {}, meta = {};
+  const out = {}, shots = {}, meta = {}, tex = {};
   for (const [vehicle, cfg] of Object.entries(VEHICLES)) {
     const isGlb = cfg.file.endsWith('.glb') || cfg.file.endsWith('.gltf');
+    // Embedded textures decode after the mesh resolves; the manager's onLoad
+    // fires once everything, images included, is in.
+    const manager = new THREE.LoadingManager();
+    const allIn = new Promise((res) => { manager.onLoad = res; });
     const loaded = isGlb
-      ? (await new GLTFLoader().loadAsync(`../assets/fbx-src/${cfg.file}`)).scene
-      : await new FBXLoader().loadAsync(`../assets/fbx-src/${cfg.file}`);
+      ? (await new GLTFLoader(manager).loadAsync(`../assets/fbx-src/${cfg.file}`)).scene
+      : await new FBXLoader(manager).loadAsync(`../assets/fbx-src/${cfg.file}`);
+    await allIn;
+    // Textures: base colour + normal are embedded in the FBX material.
+    let srcMat = null;
+    loaded.traverse((o) => { if (o.isMesh && !srcMat) srcMat = Array.isArray(o.material) ? o.material[0] : o.material; });
+    if (srcMat?.map?.image) {
+      const rough = await loadImage(`../assets/fbx-src/tex/${vehicle}_roughness.png`);
+      const metal = await loadImage(`../assets/fbx-src/tex/${vehicle}_metallic.png`);
+      tex[vehicle] = {
+        base: bake(srcMat.map.image, 1024, 0.9),
+        normal: srcMat.normalMap?.image ? bake(srcMat.normalMap.image, 1024, 0.92) : null,
+        rm: packRM(rough, metal, 512),
+      };
+    }
+
     // Merge every mesh into one soup (a re-export may arrive as several objects).
     const pieces = [];
     loaded.updateWorldMatrix(true, true);
@@ -208,10 +256,20 @@
     meta[vehicle] = { ...root.userData, shells: shells.length, parts: partTris,
       wheelCentres: wheels.map((s) => s.box.getCenter(new THREE.Vector3()).toArray().map((v) => +v.toFixed(2))) };
 
-    // Preview renders with the test livery.
+    // Preview renders: textured, with a team recolour where an atlas exists.
     if (window.__prev) scene.remove(window.__prev);
     window.__prev = root;
     scene.add(root);
+    if (tex[vehicle]) {
+      const { liveryMaterial, loadLiveries, refreshAccents } = await import('../src/three/models.js');
+      window.__BR_LIVERIES__ = { [vehicle]: { base: tex[vehicle].base, normal: tex[vehicle].normal, rm: tex[vehicle].rm } };
+      await loadLiveries();
+      const bodyGeos = root.children.filter((o) => o.isMesh && !/^wheel_/.test(o.name)).map((o) => o.geometry);
+      meta[vehicle].accents = refreshAccents(vehicle, bodyGeos).map((h) => h < 0 ? null : Math.round(h * 360) + '°');
+      // export the GLB with plain materials; the game assigns its own
+      const m = liveryMaterial(vehicle, ['#2ecc40', '#ffd12a'], /* forPreview */ true);
+      root.traverse((o) => { if (o.isMesh) { o.userData.exportMat = o.material; o.material = m; } });
+    }
     const L = size.z;
     shots[vehicle] = {};
     for (const [k, p] of Object.entries({ threeq: [L * 1.1, L * 0.7, L * 1.3], rear: [L * 0.9, L * 0.6, -L * 1.3], side: [L * 1.9, L * 0.4, 0] })) {
@@ -220,6 +278,7 @@
       shots[vehicle][k] = renderer.domElement.toDataURL('image/png');
     }
 
+    root.traverse((o) => { if (o.isMesh && o.userData.exportMat) { o.material = o.userData.exportMat; delete o.userData.exportMat; } });
     const glb = await new GLTFExporter().parseAsync(root, { binary: true });
     const bytes = new Uint8Array(glb);
     let bin = '';
@@ -227,5 +286,5 @@
     out[vehicle] = btoa(bin);
   }
   document.getElementById('out').textContent = JSON.stringify(meta, null, 2);
-  window.__meta = meta; window.__glb = out; window.__shots = shots;
+  window.__meta = meta; window.__glb = out; window.__shots = shots; window.__tex = tex;
 </script>

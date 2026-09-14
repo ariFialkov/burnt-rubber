@@ -128,9 +128,11 @@ for (const f of readdirSync(resolve(ROOT, 'assets/models'))) {
 
 import { existsSync } from 'node:fs';
 const liveries = {};
-if (existsSync(resolve(ROOT, 'assets/liveries'))) {
-  for (const f of readdirSync(resolve(ROOT, 'assets/liveries'))) {
-    if (f.endsWith('.png')) liveries[f.replace('.png', '')] = 'data:image/png;base64,' + readFileSync(resolve(ROOT, 'assets/liveries', f)).toString('base64');
+const livDir = resolve(ROOT, 'assets/liveries');
+if (existsSync(livDir)) {
+  const dataUrl = (f) => existsSync(resolve(livDir, f)) ? 'data:image/jpeg;base64,' + readFileSync(resolve(livDir, f)).toString('base64') : null;
+  for (const v of JSON.parse(readFileSync(resolve(livDir, 'index.json'), 'utf8'))) {
+    liveries[v] = { base: dataUrl(`${v}.jpg`), normal: dataUrl(`${v}_normal.jpg`), rm: dataUrl(`${v}_rm.jpg`) };
   }
 }
 
