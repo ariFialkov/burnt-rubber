@@ -114,10 +114,17 @@ function accentHues(image) {
   return [toHue(first), second === undefined ? -1 : toHue(second)];
 }
 
-// Best effort: a missing atlas just means that vehicle keeps flat paint.
+// Loads whatever assets/liveries/index.json lists (kept in sync by
+// `npm run models`), so a vehicle without an atlas costs no request at all.
 export async function loadLiveries(inline = globalThis.__BR_LIVERIES__) {
   const loader = new THREE.TextureLoader();
-  await Promise.all(Object.entries(LIVERY_FILES).map(async ([vehicle, url]) => {
+  let available;
+  if (inline) available = Object.keys(inline);
+  else {
+    try { available = await (await fetch('assets/liveries/index.json')).json(); } catch { available = []; }
+  }
+  await Promise.all(available.filter((v) => LIVERY_FILES[v]).map(async (vehicle) => {
+    const url = LIVERY_FILES[vehicle];
     try {
       const tex = await loader.loadAsync(inline && inline[vehicle] ? inline[vehicle] : url);
       tex.colorSpace = THREE.SRGBColorSpace;

@@ -42,6 +42,7 @@ const ASSETS = [
   'assets/models/rally.glb',
   'assets/models/baja.glb',
   'assets/models/moto.glb',
+  'assets/liveries/index.json',
 ];
 
 self.addEventListener('install', (e) => {

@@ -49,3 +49,11 @@ for (const [v, b64] of Object.entries(glb)) {
   console.log(`${v.padEnd(8)} ${(buf.length / 1024).toFixed(0).padStart(4)} KB  ${m.length}m x ${m.width}m x ${m.height}m  wheels ${m.wheels} r=${m.wheelRadius}  parts ${JSON.stringify(m.parts)}`);
 }
 console.log(`previews in ${previews}`);
+
+// Keep the livery manifest in step with whatever atlases are present.
+import { readdirSync, existsSync } from 'node:fs';
+const livDir = resolve(ROOT, 'assets/liveries');
+const present = existsSync(livDir) ? readdirSync(livDir).filter((f) => f.endsWith('.png')).map((f) => f.replace('.png', '')) : [];
+mkdirSync(livDir, { recursive: true });
+writeFileSync(resolve(livDir, 'index.json'), JSON.stringify(present) + '\n');
+console.log(`liveries listed: ${present.length ? present.join(', ') : 'none'}`);
