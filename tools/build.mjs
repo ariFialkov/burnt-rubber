@@ -11,7 +11,7 @@
 // It finishes by listing every extension in the output, so you can check the
 // build against a host's allowed-file-types list before uploading.
 
-import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, resolve, relative, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,8 +23,8 @@ rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
 // Directories that ship verbatim.
-for (const dir of ['src', 'vendor', 'icons', 'assets/models']) {
-  cpSync(resolve(ROOT, dir), join(OUT, dir), { recursive: true });
+for (const dir of ['src', 'vendor', 'icons', 'assets/models', 'assets/liveries']) {
+  if (existsSync(resolve(ROOT, dir))) cpSync(resolve(ROOT, dir), join(OUT, dir), { recursive: true });
 }
 
 // The manifest itself is unchanged — only its filename and the two references.

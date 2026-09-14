@@ -126,6 +126,14 @@ for (const f of readdirSync(resolve(ROOT, 'assets/models'))) {
   if (f.endsWith('.glb')) models[f.replace('.glb', '')] = readFileSync(resolve(ROOT, 'assets/models', f)).toString('base64');
 }
 
+import { existsSync } from 'node:fs';
+const liveries = {};
+if (existsSync(resolve(ROOT, 'assets/liveries'))) {
+  for (const f of readdirSync(resolve(ROOT, 'assets/liveries'))) {
+    if (f.endsWith('.png')) liveries[f.replace('.png', '')] = 'data:image/png;base64,' + readFileSync(resolve(ROOT, 'assets/liveries', f)).toString('base64');
+  }
+}
+
 const bundle = `<title>Burnt Rubber</title>
 <style>
 ${read('styles.css')}
@@ -133,6 +141,7 @@ ${read('styles.css')}
 ${markup}
 <script>
 window.__BR_MODELS__ = ${JSON.stringify(models)};
+window.__BR_LIVERIES__ = ${JSON.stringify(liveries)};
 <\/script>
 <script>
 "use strict";

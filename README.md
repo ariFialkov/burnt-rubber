@@ -123,6 +123,17 @@ and `dark`. Every car on track shares the geometry and only carries its two
 livery materials. Paint is physically based with a baked studio reflection,
 each car casts a soft contact shadow, and the bike gets a leaning rider.
 
+**Liveries.** Drop one painted atlas per vehicle into `assets/liveries/`
+(`formula.png`, `stock.png`, `rally.png`, `baja.png`, `moto.png`) and every
+car of that type is textured with it. Each team still gets its own palette:
+the shader finds the atlas's two accent hues and remaps pixels near them to
+the team's primary and secondary colours, keeping the baked shading, decals,
+numbers, whites and blacks exactly as painted. This needs the model to carry
+UV coordinates — the converter keeps them when the source has them and
+records `hasUV` in the GLB; a model without UVs keeps the flat role paint.
+The current FBX sources have no UV layer, so re-export the same meshes with
+UVs (a `.glb` with the texture embedded is ideal) and re-run `npm run models`.
+
 Cars don't pass through each other: each carries a collision footprint and a
 separation pass keeps the field apart. It works in track space (offset along
 the track vs. across it) rather than 3D, so it stays cheap even with 40 Baja

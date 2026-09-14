@@ -7,7 +7,7 @@ import { getScript } from './engine/script.js';
 import { store, settleDue, topUpIfBroke, focusRacerIdx } from './engine/bets.js';
 import { RaceScene } from './three/scene.js';
 import { CameraRig } from './three/cameras.js';
-import { loadCarModels, setCarEnvironment } from './three/models.js';
+import { loadCarModels, loadLiveries, setCarEnvironment } from './three/models.js';
 import { RoomEnvironment } from '../vendor/jsm/environments/RoomEnvironment.js';
 import { initHub, updateHub } from './ui/hub.js';
 import { initBoard, updateBoard, invalidateBoard } from './ui/board.js';
@@ -138,7 +138,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // --- Load the cars, then go live ------------------------------------------
 $('chyron-title').textContent = 'WARMING UP THE GRID…';
 try {
-  await loadCarModels();
+  await Promise.all([loadCarModels(), loadLiveries()]);
 } catch (e) {
   console.warn('car models unavailable, using procedural cars', e);
 }

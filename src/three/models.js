@@ -19,7 +19,19 @@ export const MODEL_FILES = {
 };
 
 const templates = new Map(); // vehicle -> { meta, parts: {role: geometry}, wheels: [{geometry, position, radius}] }
+const liveries = new Map();  // vehicle -> { texture, accents: [hue, hue] }
 let envMap = null;
+
+// Livery atlases. One painted template per vehicle; each team gets its own
+// palette by remapping the template's accent hues in the shader, so the
+// painted shapes, numbers and shading stay and only the colours change.
+export const LIVERY_FILES = {
+  formula: 'assets/liveries/formula.png',
+  stock: 'assets/liveries/stock.png',
+  rally: 'assets/liveries/rally.png',
+  baja: 'assets/liveries/baja.png',
+  moto: 'assets/liveries/moto.png',
+};
 
 // Shared, look-alike materials: one each for the whole field.
 const SHARED = {
@@ -72,6 +84,92 @@ export async function loadCarModels(inline = globalThis.__BR_MODELS__) {
 }
 
 export const hasModel = (vehicle) => templates.has(vehicle);
+export const hasLivery = (vehicle) => liveries.has(vehicle) && !!templates.get(vehicle)?.meta.hasUV;
+
+// The two most common saturated hues in an atlas are its accent colours —
+// what a team's primary and secondary replace.
+function accentHues(image) {
+  const c = document.createElement('canvas');
+  const w = c.width = 128, h = c.height = 128;
+  const g = c.getContext('2d');
+  g.drawImage(image, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data;
+  const bins = new Float32Array(36);
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i] / 255, gg = d[i + 1] / 255, b = d[i + 2] / 255;
+    const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
+    const sat = mx > 0 ? (mx - mn) / mx : 0;
+    if (sat < 0.35 || mx < 0.15) continue; // neutrals never count
+    let hue;
+    if (mx === r) hue = ((gg - b) / (mx - mn) + 6) % 6;
+    else if (mx === gg) hue = (b - r) / (mx - mn) + 2;
+    else hue = (r - gg) / (mx - mn) + 4;
+    bins[Math.floor(hue * 6) % 36] += sat;
+  }
+  const order = [...bins.keys()].sort((a, b) => bins[b] - bins[a]);
+  const first = order[0];
+  // second accent must be a genuinely different hue (> 60° away)
+  const second = order.find((k) => Math.min(Math.abs(k - first), 36 - Math.abs(k - first)) > 6);
+  const toHue = (k) => (k + 0.5) / 36;
+  return [toHue(first), second === undefined ? -1 : toHue(second)];
+}
+
+// Best effort: a missing atlas just means that vehicle keeps flat paint.
+export async function loadLiveries(inline = globalThis.__BR_LIVERIES__) {
+  const loader = new THREE.TextureLoader();
+  await Promise.all(Object.entries(LIVERY_FILES).map(async ([vehicle, url]) => {
+    try {
+      const tex = await loader.loadAsync(inline && inline[vehicle] ? inline[vehicle] : url);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.flipY = false; // glTF convention, matching the converted models
+      tex.anisotropy = 4;
+      liveries.set(vehicle, { texture: tex, accents: accentHues(tex.image) });
+    } catch { /* no livery for this vehicle */ }
+  }));
+}
+
+// Paint material driven by the atlas: pixels near an accent hue are recoloured
+// to the team colour while keeping the atlas's own shading; everything else
+// (whites, blacks, greys, decals) is left as painted.
+const RECOLOR = `
+  vec3 br_rgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-5)), d / (q.x + 1e-5), q.x);
+  }
+  float br_hueDist(float a, float b) { float d = abs(a - b); return min(d, 1.0 - d); }
+  vec3 br_recolor(vec3 c, float hue, vec3 team) {
+    if (hue < 0.0) return c;
+    vec3 hsv = br_rgb2hsv(c);
+    float w = (1.0 - smoothstep(0.05, 0.11, br_hueDist(hsv.x, hue))) * smoothstep(0.25, 0.45, hsv.y);
+    // Keep the atlas's baked shading: the team colour scaled by how bright
+    // this pixel is relative to the accent at full strength.
+    vec3 shaded = team * clamp(hsv.z * 1.15, 0.0, 1.0);
+    return mix(c, shaded, w);
+  }
+`;
+
+export function liveryMaterial(vehicle, colors) {
+  const l = liveries.get(vehicle);
+  if (!l) return null;
+  const m = new THREE.MeshStandardMaterial({ map: l.texture, metalness: 0.25, roughness: 0.4, envMap });
+  const u = {
+    uPrimHue: { value: l.accents[0] }, uSecHue: { value: l.accents[1] },
+    uPrim: { value: new THREE.Color(colors[0]) }, uSec: { value: new THREE.Color(colors[1]) },
+  };
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, u);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform float uPrimHue, uSecHue; uniform vec3 uPrim, uSec;${RECOLOR}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        diffuseColor.rgb = br_recolor(diffuseColor.rgb, uPrimHue, uPrim);
+        diffuseColor.rgb = br_recolor(diffuseColor.rgb, uSecHue, uSec);`);
+  };
+  m.customProgramCacheKey = () => 'br-livery'; // one program for the whole field
+  return m;
+}
 
 // Onboard eye as fractions of (height, length from centre, +Z forward). The
 // open cockpit sits ahead of the airbox and the rider above the tank; the
@@ -139,16 +237,19 @@ export function buildModelCar(vehicle, colors) {
   if (!t) return null;
   const [primary, secondary] = colors;
   const group = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color: primary, metalness: 0.35, roughness: 0.32, envMap });
-  const trim = new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.3, roughness: 0.4, envMap });
-  const mats = { primary: paint, secondary: trim, glass: SHARED.glass, dark: SHARED.dark };
+  const livery = hasLivery(vehicle) ? liveryMaterial(vehicle, colors) : null;
+  const paint = livery || new THREE.MeshStandardMaterial({ color: primary, metalness: 0.35, roughness: 0.32, envMap });
+  const trim = livery || new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.3, roughness: 0.4, envMap });
+  const mats = livery
+    ? { primary: livery, secondary: livery, glass: livery, dark: livery } // the atlas paints everything
+    : { primary: paint, secondary: trim, glass: SHARED.glass, dark: SHARED.dark };
   for (const [role, geometry] of Object.entries(t.parts)) {
     const m = new THREE.Mesh(geometry, mats[role] || SHARED.dark);
     m.name = role;
     group.add(m);
   }
   const wheels = t.wheels.map((w) => {
-    const m = new THREE.Mesh(w.geometry, SHARED.wheel);
+    const m = new THREE.Mesh(w.geometry, livery || SHARED.wheel);
     m.position.copy(w.position);
     m.userData.radius = w.radius;
     group.add(m);

@@ -20,6 +20,7 @@
 <script type="module">
   import * as THREE from 'three';
   import { FBXLoader } from '../vendor/jsm/loaders/FBXLoader.js';
+  import { GLTFLoader } from '../vendor/jsm/loaders/GLTFLoader.js';
   import { GLTFExporter } from '../vendor/jsm/exporters/GLTFExporter.js';
   import * as BGU from '../vendor/jsm/utils/BufferGeometryUtils.js';
   import { RoomEnvironment } from '../vendor/jsm/environments/RoomEnvironment.js';
@@ -66,19 +67,23 @@
   // Gather the triangles of several shells into one geometry (indexed).
   function gather(geo, shellList, offset) {
     const pos = geo.attributes.position.array, nor = geo.attributes.normal.array;
-    const n = shellList.reduce((a, s) => a + s.tris.length, 0) * 9;
-    const p = new Float32Array(n), q = new Float32Array(n);
-    let w = 0;
+    const uv = geo.attributes.uv ? geo.attributes.uv.array : null;
+    const triN = shellList.reduce((a, s) => a + s.tris.length, 0);
+    const p = new Float32Array(triN * 9), q = new Float32Array(triN * 9);
+    const u = uv ? new Float32Array(triN * 6) : null;
+    let w = 0, wu = 0;
     for (const s of shellList) for (const t of s.tris) {
       for (let k = 0; k < 9; k++) {
         p[w + k] = pos[9 * t + k] - (offset ? offset.getComponent(k % 3) : 0);
         q[w + k] = nor[9 * t + k];
       }
-      w += 9;
+      if (uv) for (let k = 0; k < 6; k++) u[wu + k] = uv[6 * t + k];
+      w += 9; wu += 6;
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(p, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(q, 3));
+    if (u) g.setAttribute('uv', new THREE.BufferAttribute(u, 2));
     return BGU.mergeVertices(g, 1e-4);
   }
 
@@ -135,14 +140,30 @@
 
   const out = {}, shots = {}, meta = {};
   for (const [vehicle, cfg] of Object.entries(VEHICLES)) {
-    const obj = await new FBXLoader().loadAsync(`../assets/fbx-src/${cfg.file}`);
-    let src = null;
-    obj.traverse((o) => { if (o.isMesh) src = o; });
-    src.updateWorldMatrix(true, false);
-
-    // World space (Y up, length on X), then nose to +Z, then scale to metres.
-    const geo = src.geometry.clone().applyMatrix4(src.matrixWorld);
-    geo.rotateY(Math.PI / 2); // -X (nose) -> +Z
+    const isGlb = cfg.file.endsWith('.glb') || cfg.file.endsWith('.gltf');
+    const loaded = isGlb
+      ? (await new GLTFLoader().loadAsync(`../assets/fbx-src/${cfg.file}`)).scene
+      : await new FBXLoader().loadAsync(`../assets/fbx-src/${cfg.file}`);
+    // Merge every mesh into one soup (a re-export may arrive as several objects).
+    const pieces = [];
+    loaded.updateWorldMatrix(true, true);
+    loaded.traverse((o) => {
+      if (!o.isMesh) return;
+      let g = o.geometry.clone();
+      if (g.index) g = g.toNonIndexed();
+      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+      if (!g.attributes.normal) g.computeVertexNormals();
+      g.applyMatrix4(o.matrixWorld);
+      pieces.push(g);
+    });
+    const everyUV = pieces.every((g) => g.attributes.uv);
+    if (!everyUV) pieces.forEach((g) => g.deleteAttribute('uv'));
+    const geo = pieces.length === 1 ? pieces[0] : BGU.mergeGeometries(pieces, false);
+    // Nose to +Z. FBX sources here run along -X; a glTF is already Y-up with
+    // +Z... conventions vary, so the per-vehicle `nose` says which axis.
+    if ((cfg.nose || '-x') === '-x') geo.rotateY(Math.PI / 2);
+    else if (cfg.nose === '+x') geo.rotateY(-Math.PI / 2);
+    else if (cfg.nose === '-z') geo.rotateY(Math.PI);
     let box = new THREE.Box3().setFromBufferAttribute(geo.attributes.position);
     let size = box.getSize(new THREE.Vector3());
     geo.scale(cfg.length / size.z, cfg.length / size.z, cfg.length / size.z);
@@ -182,6 +203,7 @@
     root.userData = {
       vehicle, length: +size.z.toFixed(3), width: +size.x.toFixed(3), height: +size.y.toFixed(3),
       wheelRadius: +wheelRadius.toFixed(3), wheels: wheels.length,
+      hasUV: !!geo.attributes.uv, // a livery atlas can only be applied when this is true
     };
     meta[vehicle] = { ...root.userData, shells: shells.length, parts: partTris,
       wheelCentres: wheels.map((s) => s.box.getCenter(new THREE.Vector3()).toArray().map((v) => +v.toFixed(2))) };
