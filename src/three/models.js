@@ -40,6 +40,7 @@ const SHARED = {
   tint: new THREE.MeshStandardMaterial({ color: 0x33475c, metalness: 0.6, roughness: 0.1, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }),
   screen: new THREE.MeshStandardMaterial({ color: 0xc4d9ec, metalness: 0.5, roughness: 0.08, transparent: true, opacity: 0.26, depthWrite: false, side: THREE.DoubleSide }),
   interior: new THREE.MeshStandardMaterial({ color: 0x0f1115, metalness: 0.1, roughness: 0.95 }),
+  suit: new THREE.MeshStandardMaterial({ color: 0x1c1e24, metalness: 0.05, roughness: 0.85 }),
   dark: new THREE.MeshStandardMaterial({ color: 0x23262c, metalness: 0.25, roughness: 0.65 }),
   wheel: new THREE.MeshStandardMaterial({ color: 0x141618, metalness: 0.05, roughness: 0.9 }),
 };
@@ -59,7 +60,8 @@ function b64ToBuffer(b64) {
 
 function ingest(vehicle, gltf) {
   const parts = {};
-  const pivots = {}; // parts built around a hinge (the bike's stand) sit at it
+  const pivots = {}; // parts built around a hinge (the bike's stand, the driver's joints) sit at it
+  const parents = {}; // a part nested under another (a forearm on its upper arm)
   const wheels = [];
   let meta = null;
   gltf.scene.traverse((o) => {
@@ -70,11 +72,12 @@ function ingest(vehicle, gltf) {
     } else {
       parts[o.name] = o.geometry;
       if (o.position.lengthSq() > 0) pivots[o.name] = o.position.clone();
+      if (o.parent && o.parent.isMesh) parents[o.name] = o.parent.name;
     }
   });
   if (!meta) throw new Error(`model ${vehicle}: metadata missing`);
   for (const w of wheels) w.radius = meta.wheelRadius || w.radius;
-  templates.set(vehicle, { meta, parts, pivots, wheels });
+  templates.set(vehicle, { meta, parts, pivots, parents, wheels });
 }
 
 // Load every vehicle. `inline` (vehicle -> base64 GLB) is used by the
@@ -366,8 +369,27 @@ export function buildModelCar(vehicle, colors) {
     const C = cockpitFor(vehicle);
     if (dt) {
       const mat = hasLivery('rider') ? liveryMaterial('rider', colors) : new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.1, roughness: 0.7, envMap });
-      const d = new THREE.Mesh(dt.parts.body, mat);
+      // Body, plus each arm as an upper arm pivoted at the shoulder carrying
+      // a forearm pivoted at the elbow, so the hands can be aimed at the wheel.
+      const d = new THREE.Group();
       d.name = 'driver';
+      const meshes = {};
+      for (const [name, geometry] of Object.entries(dt.parts)) {
+        const m = new THREE.Mesh(geometry, mat);
+        m.name = name;
+        if (dt.pivots[name]) m.position.copy(dt.pivots[name]);
+        meshes[name] = m;
+      }
+      for (const [name, m] of Object.entries(meshes)) (dt.parents[name] ? meshes[dt.parents[name]] : d).add(m);
+      // Joint fillers, so a bent elbow never opens a gap.
+      const joint = new THREE.SphereGeometry(0.045, 10, 8);
+      for (const side of ['l', 'r']) {
+        const upper = meshes['arm_' + side], fore = meshes['fore_' + side];
+        if (!upper || !fore) continue;
+        upper.add(new THREE.Mesh(joint, SHARED.suit));
+        const e = new THREE.Mesh(joint, SHARED.suit); e.position.copy(fore.position); upper.add(e);
+      }
+      d.userData.arms = dt.meta.arms || null;
       placeDriver(d, C, dt.meta);
       group.add(d);
     }

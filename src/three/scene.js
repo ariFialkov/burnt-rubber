@@ -575,7 +575,7 @@ export class RaceScene {
     for (const w of car.wheels) w.rotation.x -= Math.min(car.speed / (w.userData.radius || 0.45), WHEEL_OMEGA_MAX) * dt;
 
     // The steering wheel in the cockpit kit turns with the road ahead and
-    // whatever the car is steering across.
+    // whatever the car is steering across, and the driver's hands go with it.
     if (this.kit && this.kit.parent === car.group) {
       car.group.updateMatrixWorld();
       this.updateClipPlanes(car);
@@ -583,7 +583,54 @@ export class RaceScene {
       if (wheel) {
         const target = clamp(turn * 3 + car.yaw * 4, -1.2, 1.2);
         wheel.rotation.z += (target - wheel.rotation.z) * Math.min(1, 10 * dt);
+        this.driveHands(car, wheel.rotation.z, dt);
       }
+    }
+  }
+
+  // Two-bone IK from the shoulders to grips on the wheel rim. The hands ride
+  // the rim as it turns; past a certain angle they let go and re-grip further
+  // round, hand over hand, as a driver does in a hard corner.
+  driveHands(car, wheelRot, dt) {
+    const D = car.driver;
+    const A = D && D.userData.arms;
+    const W = cockpitFor(this.race.tour.vehicle).wheel;
+    if (!A || !W) return;
+    const H = D.scale.x;
+    const REGRIP = 1.1; // radians of wheel turn a grip lasts before the hand moves round
+    const follow = wheelRot - Math.round(wheelRot / REGRIP) * REGRIP;
+    const tiltQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), W.tilt);
+    for (const side of ['l', 'r']) {
+      const arm = D.getObjectByName('arm_' + side), fore = D.getObjectByName('fore_' + side);
+      const J = A[side];
+      if (!arm || !fore || !J) continue;
+      // Grip point on the rim (car frame, where +X is the car's left): the
+      // left hand at ten o'clock, the right at two.
+      const phi = (side === 'l' ? Math.PI / 6 : Math.PI * 5 / 6) + follow;
+      const rim = new THREE.Vector3(Math.cos(phi) * W.r, Math.sin(phi) * W.r, 0).applyQuaternion(tiltQ).add(new THREE.Vector3(W.x, W.y, W.z));
+      // ...into the driver's frame (it is only scaled and translated).
+      const T = rim.sub(D.position).divideScalar(H);
+      // Hands slide, and let go and re-grip, at a hand's pace rather than snapping.
+      const smooth = car['hand_' + side] || (car['hand_' + side] = T.clone());
+      smooth.lerp(T, Math.min(1, 12 * dt));
+      const S = new THREE.Vector3().fromArray(J.shoulder), E0 = new THREE.Vector3().fromArray(J.elbow), H0 = new THREE.Vector3().fromArray(J.hand);
+      const L1 = E0.distanceTo(S), L2 = H0.distanceTo(E0);
+      const toT = smooth.clone().sub(S);
+      const d = clamp(toT.length(), Math.abs(L1 - L2) + 1e-3, L1 + L2 - 1e-3);
+      const axis = toT.normalize();
+      // Elbow out and down from the line to the hand.
+      const pole = new THREE.Vector3(side === 'l' ? 0.25 : -0.25, -0.6, 0.1);
+      const poleDir = pole.sub(axis.clone().multiplyScalar(pole.dot(axis))).normalize();
+      const cosA = clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1);
+      const sinA = Math.sqrt(1 - cosA * cosA);
+      const E = S.clone().addScaledVector(axis, L1 * cosA).addScaledVector(poleDir, L1 * sinA);
+      const Tc = S.clone().addScaledVector(axis, d);
+      // Upper arm: its rest direction onto shoulder->elbow. Forearm: rest onto
+      // elbow->hand, expressed in the upper arm's frame.
+      const q1 = new THREE.Quaternion().setFromUnitVectors(E0.clone().sub(S).normalize(), E.clone().sub(S).normalize());
+      const q2 = new THREE.Quaternion().setFromUnitVectors(H0.clone().sub(E0).normalize(), Tc.sub(E).normalize());
+      arm.quaternion.copy(q1);
+      fore.quaternion.copy(q1.clone().invert().multiply(q2));
     }
   }
 

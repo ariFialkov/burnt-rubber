@@ -224,6 +224,7 @@ export function enterLive(ctx) {
   $('event-feed').innerHTML = '';
   $('results').classList.add('hidden');
   $('popup-bet').classList.add('hidden');
+  $('finish-card').classList.add('hidden');
   setCam(st.phase === 'racing' ? 'chopper' : 'chopper');
 }
 
@@ -236,6 +237,7 @@ export function updateLive(ctx) {
     $('event-feed').innerHTML = '';
     $('results').classList.add('hidden');
     $('popup-bet').classList.add('hidden');
+    $('finish-card').classList.add('hidden');
   }
 
   $('live-race').textContent = `${race.tour.name} — ${race.track.name} · ${race.track.loc}`;
@@ -293,10 +295,12 @@ function updateFinishCard(ctx, st, script) {
   const car = scene?.cars[sel];
   const show = onboard && st.phase === 'racing' && !!car && car.dist >= script.totalDist && !ui.resultsShown;
   const key = show ? String(sel) : '';
-  if (key === ui.finishKey) return;
-  ui.finishKey = key;
   const el = $('finish-card');
-  if (!show) { el.classList.add('hidden'); return; }
+  // Never trust the cached key alone: a fresh UI state (new race, re-entered
+  // view) starts blank while the card may still be up from before.
+  if (!show) { el.classList.add('hidden'); ui.finishKey = ''; return; }
+  if (key === ui.finishKey && !el.classList.contains('hidden')) return;
+  ui.finishKey = key;
   const r = race.field[sel];
   const pos = script.finishOrder.indexOf(sel) + 1;
   if (!ui.crossT.has(sel)) ui.crossT.set(sel, crossingTime(script, sel, scene.adj));

@@ -370,6 +370,7 @@
     const rotAbout = (v, pivot, axis, angle) => { v.sub(pivot).applyAxisAngle(axis, angle).add(pivot); };
     const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
     const baseGeo = geo;
+    const basePos = baseGeo.attributes.position; // original (A-pose) coordinates, for classifying parts
     const { liveryMaterial, loadLiveries, refreshAccents, placeRider } = await import('../src/three/models.js');
     if (tex.rider) { window.__BR_LIVERIES__ = { rider: tex.rider }; await loadLiveries(); }
 
@@ -379,6 +380,7 @@
     const v = new THREE.Vector3();
     const head = new THREE.Vector3(); let headN = 0;
     const hands = new THREE.Vector3(); let handsN = 0;
+    const handL = new THREE.Vector3(), handR = new THREE.Vector3(); let handLN = 0, handRN = 0;
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
       const x0 = v.x, y0 = v.y;
@@ -418,34 +420,91 @@
       }
       pos.setXYZ(i, v.x, v.y, v.z);
       if (y0 > 0.9) { head.add(v); headN++; }
-      if (isArm && y0 < 0.45) { hands.x += Math.abs(v.x); hands.y += v.y; hands.z += v.z; handsN++; }
+      if (isArm && y0 < 0.45) {
+        hands.x += Math.abs(v.x); hands.y += v.y; hands.z += v.z; handsN++;
+        if (x0 > 0) { handL.add(v); handLN++; } else { handR.add(v); handRN++; }
+      }
     }
+    // Where the arm joints ended up, per side (the same rotations the arm
+    // vertices got), so the driver's arms can be split off and re-aimed at
+    // runtime from these pivots.
+    const jointsFor = (side) => {
+      const shoulder = new THREE.Vector3(side * J.shoulderX, J.shoulder, 0);
+      const elbow = new THREE.Vector3(side * J.elbowX, J.elbow, 0);
+      rotAbout(elbow, shoulder.clone(), X, -A.upper);
+      rotAbout(elbow, shoulder.clone(), Z, side * A.out);
+      for (const p of [shoulder, elbow]) rotAbout(p, new THREE.Vector3(0, J.hip, 0), X, A.lean);
+      const hand = (side > 0 ? handL.clone().divideScalar(Math.max(1, handLN)) : handR.clone().divideScalar(Math.max(1, handRN)));
+      for (const p of [shoulder, elbow, hand]) p.y -= J.hip;
+      return { shoulder, elbow, hand };
+    };
     // Hips at the origin: the seat point is where this lands.
     geo.translate(0, -J.hip, 0);
     head.divideScalar(Math.max(1, headN)).y -= J.hip;
     hands.divideScalar(Math.max(1, handsN)).y -= J.hip;
     geo.computeVertexNormals();
-    const posed = BGU.mergeVertices(geo, 1e-4);
-    const pb = new THREE.Box3().setFromBufferAttribute(posed.attributes.position);
-    const ps = pb.getSize(new THREE.Vector3());
-
     const riderRoot = new THREE.Group();
     riderRoot.name = figure;
-    const riderMesh = new THREE.Mesh(posed, PALETTE.primary);
-    riderMesh.name = 'body';
-    riderRoot.add(riderMesh);
+    let posed, riderMesh;
+    const arms = {};
+    if (figure === 'driver') {
+      // Split the arms off as their own meshes — upper arm pivoted at the
+      // shoulder, forearm (with the hand) a child of it pivoted at the elbow
+      // — so the runtime can aim the hands at the wheel. Triangles are
+      // assigned by where their vertices started in the A-pose.
+      const lists = { body: [], arm_l: [], fore_l: [], arm_r: [], fore_r: [] };
+      const triN = pos.count / 3;
+      for (let t = 0; t < triN; t++) {
+        let arm = 0, fore = 0, sideSum = 0;
+        for (let k = 0; k < 3; k++) {
+          const x0 = basePos.getX(3 * t + k), y0 = basePos.getY(3 * t + k);
+          const isArm = y0 > 0.36 && y0 < 0.86 && Math.abs(x0) > 0.105;
+          if (isArm) { arm++; sideSum += Math.sign(x0); if (y0 < J.elbow - 0.03) fore++; }
+        }
+        if (arm >= 2) {
+          const side = sideSum > 0 ? 'l' : 'r';
+          lists[(fore >= 2 ? 'fore_' : 'arm_') + side].push(t);
+        } else lists.body.push(t);
+      }
+      const joints = { l: jointsFor(1), r: jointsFor(-1) };
+      posed = gather(geo, [{ tris: lists.body }]);
+      riderMesh = new THREE.Mesh(posed, PALETTE.primary);
+      riderMesh.name = 'body';
+      riderRoot.add(riderMesh);
+      for (const side of ['l', 'r']) {
+        const jt = joints[side];
+        const upper = new THREE.Mesh(gather(geo, [{ tris: lists['arm_' + side] }], jt.shoulder), PALETTE.primary);
+        upper.name = 'arm_' + side;
+        upper.position.copy(jt.shoulder);
+        const fore = new THREE.Mesh(gather(geo, [{ tris: lists['fore_' + side] }], jt.elbow), PALETTE.primary);
+        fore.name = 'fore_' + side;
+        fore.position.copy(jt.elbow).sub(jt.shoulder);
+        upper.add(fore);
+        riderRoot.add(upper);
+        arms[side] = { shoulder: jt.shoulder.toArray().map((x) => +x.toFixed(3)), elbow: jt.elbow.toArray().map((x) => +x.toFixed(3)), hand: jt.hand.toArray().map((x) => +x.toFixed(3)) };
+      }
+    } else {
+      posed = BGU.mergeVertices(geo, 1e-4);
+      riderMesh = new THREE.Mesh(posed, PALETTE.primary);
+      riderMesh.name = 'body';
+      riderRoot.add(riderMesh);
+    }
+    const pb = new THREE.Box3().setFromObject(riderRoot);
+    const ps = pb.getSize(new THREE.Vector3());
     riderRoot.userData = { vehicle: figure, length: +ps.z.toFixed(3), width: +ps.x.toFixed(3), height: +ps.y.toFixed(3), wheelRadius: 0, wheels: 0, hasUV: !!posed.attributes.uv,
       // in units of standing height: how far the hips sit above the feet, and
       // where the head and hands ended up relative to the hips
       hipHeight: J.hip,
-      head: head.toArray().map((x) => +x.toFixed(3)), hands: hands.toArray().map((x) => +x.toFixed(3)) };
+      head: head.toArray().map((x) => +x.toFixed(3)), hands: hands.toArray().map((x) => +x.toFixed(3)),
+      ...(figure === 'driver' ? { arms } : {}) };
     meta[figure] = { ...riderRoot.userData };
 
     // Preview: the rider on the bike, in the game's own placement, with a
     // team recolour; the driver on his own.
     if (tex.rider) {
       if (figure === 'rider') meta.rider.accents = refreshAccents('rider', [posed]).map((h) => h < 0 ? null : Math.round(h * 360) + '°');
-      riderMesh.material = liveryMaterial('rider', ['#2ecc40', '#ffd12a']);
+      const m = liveryMaterial('rider', ['#2ecc40', '#ffd12a']);
+      riderRoot.traverse((o) => { if (o.isMesh) o.material = m; });
     }
     if (window.__prev) scene.remove(window.__prev);
     const combo = new THREE.Group();
@@ -464,7 +523,7 @@
       renderer.render(scene, cam);
       shots[figure][k] = renderer.domElement.toDataURL('image/png');
     }
-    riderMesh.material = PALETTE.primary;
+    riderRoot.traverse((o) => { if (o.isMesh) o.material = PALETTE.primary; });
     const glb = await new GLTFExporter().parseAsync(riderRoot, { binary: true });
     const bytes = new Uint8Array(glb);
     let bin = '';

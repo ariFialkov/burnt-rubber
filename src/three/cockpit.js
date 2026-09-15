@@ -50,6 +50,9 @@ export const COCKPIT = {
   moto: {
     eye: { x: 0, y: 1.30, z: 0.0 }, look: { down: 0.12 },
     open: true, bike: true,
+    // The windscreen is part of the fairing shell (up to y 1.27 half a metre
+    // ahead of the eye); clip it out of the rider's view.
+    clip: { y0: 1.02, y1: 1.6, z0: 0.36, z1: 0.9 },
   },
 };
 

@@ -143,8 +143,11 @@ Five cameras:
   over the bars through its screen. Every car carries a driver (the rider
   figure in a second, seated pose from the same pipeline), head on the
   camera's eye point so the onboard view looks out of the helmet with the
-  arms on the wheel, and the glazing is tinted rather than opaque so the
-  driver shows through it from outside
+  arms on the wheel — the arms are exported as jointed upper arms and
+  forearms and aimed at grips on the rim by two-bone IK, riding the wheel
+  as it turns and re-gripping hand over hand in hard corners — and the
+  glazing is tinted rather than opaque so the driver shows through it from
+  outside
 - **Hood-back**: a reverse angle — a boom out ahead of the nose, above hood
   height, looking back over the car at whoever is chasing it
 - **Cinematic**: trackside cameras auto-placed at the highest-curvature
