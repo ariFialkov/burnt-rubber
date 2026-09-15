@@ -84,58 +84,82 @@ function bar(a, b, r, mat) {
   return m;
 }
 
-// Dashboard face: dials and a display, drawn once per style.
-function dashTexture(style) {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 128;
-  const g = c.getContext('2d');
+// Dashboard face: dials, a display and a row of warning lamps, redrawn a
+// few times a second from the car's state while the driver camera rides it.
+function dialFace(g, cx, cy, r, val, label) {
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fillStyle = '#1d2027'; g.fill();
+  g.lineWidth = 3; g.strokeStyle = '#4a5060'; g.stroke();
+  for (let k = 0; k <= 10; k++) {
+    const a = Math.PI * 0.75 + (k / 10) * Math.PI * 1.5;
+    g.beginPath(); g.moveTo(cx + Math.cos(a) * r * 0.78, cy + Math.sin(a) * r * 0.78); g.lineTo(cx + Math.cos(a) * r * 0.92, cy + Math.sin(a) * r * 0.92);
+    g.strokeStyle = k >= 8 ? '#ff4d5e' : '#9aa3b5'; g.lineWidth = 2; g.stroke();
+  }
+  const a = Math.PI * 0.75 + Math.max(0, Math.min(1, val)) * Math.PI * 1.5;
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * r * 0.8, cy + Math.sin(a) * r * 0.8);
+  g.strokeStyle = '#ff8c1a'; g.lineWidth = 3; g.stroke();
+  g.fillStyle = '#c9d0dc'; g.font = 'bold 11px sans-serif'; g.textAlign = 'center'; g.fillText(label, cx, cy + r * 0.55);
+}
+const lampRow = (g, x, y, lamps) => {
+  lamps.forEach(([label, on, col], k) => {
+    g.fillStyle = on ? col : '#23262d';
+    g.beginPath(); g.arc(x + k * 34, y, 7, 0, Math.PI * 2); g.fill();
+    g.fillStyle = on ? '#e8ecf4' : '#5a6070'; g.font = 'bold 8px sans-serif'; g.textAlign = 'center'; g.fillText(label, x + k * 34, y + 17);
+  });
+};
+// st: { speed (m/s), rpm 0..1, gear, gears, braking, wet, lap, laps, fuel 0..1, blink }
+export function drawDash(g, style, st) {
   g.fillStyle = '#15171c'; g.fillRect(0, 0, 512, 128);
   g.fillStyle = '#0d0e11'; g.fillRect(8, 8, 496, 112);
-  const dial = (cx, cy, r, val, label) => {
-    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fillStyle = '#1d2027'; g.fill();
-    g.lineWidth = 3; g.strokeStyle = '#4a5060'; g.stroke();
-    for (let k = 0; k <= 10; k++) {
-      const a = Math.PI * 0.75 + (k / 10) * Math.PI * 1.5;
-      g.beginPath(); g.moveTo(cx + Math.cos(a) * r * 0.78, cy + Math.sin(a) * r * 0.78); g.lineTo(cx + Math.cos(a) * r * 0.92, cy + Math.sin(a) * r * 0.92);
-      g.strokeStyle = k >= 8 ? '#ff4d5e' : '#9aa3b5'; g.lineWidth = 2; g.stroke();
-    }
-    const a = Math.PI * 0.75 + val * Math.PI * 1.5;
-    g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * r * 0.8, cy + Math.sin(a) * r * 0.8);
-    g.strokeStyle = '#ff8c1a'; g.lineWidth = 3; g.stroke();
-    g.fillStyle = '#c9d0dc'; g.font = 'bold 11px sans-serif'; g.textAlign = 'center'; g.fillText(label, cx, cy + r * 0.55);
-  };
+  const mph = style === 'stock' || style === 'baja';
+  const speedShown = st.speed * (mph ? 2.237 : 3.6);
+  const speedMax = mph ? 220 : 300;
+  const lamps = [['BRAKE', st.braking, '#ff4d5e'], ['RAIN', st.wet, '#38b6ff'], ['FUEL', st.fuel < 0.2 && st.blink, '#ffd12a'], ['OIL', false, '#ff8c1a']];
   if (style === 'baja') {
-    dial(70, 64, 42, 0.62, 'RPM'); dial(170, 64, 42, 0.48, 'MPH');
+    dialFace(g, 70, 64, 42, st.rpm, 'RPM'); dialFace(g, 170, 64, 42, speedShown / speedMax, 'MPH');
     g.fillStyle = '#0a1f16'; g.fillRect(230, 22, 200, 84); g.strokeStyle = '#2ee6a8'; g.lineWidth = 2; g.strokeRect(230, 22, 200, 84);
     g.strokeStyle = '#2ee6a8'; g.lineWidth = 2; g.beginPath(); g.moveTo(250, 90); g.lineTo(290, 60); g.lineTo(330, 70); g.lineTo(380, 34); g.lineTo(410, 50); g.stroke();
-    g.fillStyle = '#2ee6a8'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText('GPS · STAGE 2', 238, 36);
-    for (let k = 0; k < 4; k++) { g.fillStyle = k % 2 ? '#ff4d5e' : '#ffd12a'; g.fillRect(446 + k * 14, 40, 9, 26); }
+    // the stage marker crawls along the route with the race
+    const p = Math.max(0, Math.min(1, st.progress || 0)) * 160 + 250;
+    g.fillStyle = '#ffd12a'; g.beginPath(); g.arc(p, 90 - Math.abs(Math.sin(p * 0.05)) * 40, 4, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#2ee6a8'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText(`GPS · LAP ${st.lap}/${st.laps} · ${Math.round(speedShown)} MPH`, 238, 36);
+    g.textAlign = 'right'; g.fillText(`G${st.gear}`, 424, 100);
+    lampRow(g, 452, 44, lamps.slice(0, 3).map((l) => [l[0], l[1], l[2]]).map((l, k) => k === 2 ? l : l));
+    // fuel bar
+    g.fillStyle = '#23262d'; g.fillRect(438, 80, 60, 8); g.fillStyle = st.fuel < 0.2 ? '#ff4d5e' : '#ffd12a'; g.fillRect(438, 80, 60 * Math.max(0, st.fuel), 8);
   } else {
-    dial(90, 64, 48, style === 'rally' ? 0.7 : 0.82, 'RPM'); dial(200, 64, 40, 0.6, style === 'rally' ? 'KM/H' : 'MPH');
-    dial(300, 64, 30, 0.55, 'OIL'); dial(370, 64, 30, 0.5, 'H2O');
+    dialFace(g, 90, 64, 48, st.rpm, 'RPM'); dialFace(g, 200, 64, 40, speedShown / speedMax, mph ? 'MPH' : 'KM/H');
+    dialFace(g, 300, 64, 30, 0.55 + 0.05 * Math.sin(st.t || 0), 'OIL'); dialFace(g, 370, 64, 30, 0.5 + 0.2 * Math.min(1, (st.t || 0) / 40), 'H2O');
     g.fillStyle = '#101b2c'; g.fillRect(414, 30, 88, 68); g.strokeStyle = '#38b6ff'; g.lineWidth = 2; g.strokeRect(414, 30, 88, 68);
-    g.fillStyle = '#38b6ff'; g.font = 'bold 26px sans-serif'; g.textAlign = 'center'; g.fillText(style === 'rally' ? '4' : 'P', 458, 74);
-    g.font = 'bold 10px sans-serif'; g.fillText(style === 'rally' ? 'GEAR' : 'LAP', 458, 90);
+    g.fillStyle = '#38b6ff'; g.font = 'bold 26px sans-serif'; g.textAlign = 'center';
+    g.fillText(style === 'rally' ? String(st.gear) : `${st.lap}/${st.laps}`, 458, 74);
+    g.font = 'bold 10px sans-serif'; g.fillText(style === 'rally' ? `GEAR · ${Math.round(speedShown)}` : `LAP · G${st.gear}`, 458, 90);
+    lampRow(g, 258, 108, lamps);
+    g.fillStyle = '#23262d'; g.fillRect(418, 108, 84, 6); g.fillStyle = st.fuel < 0.2 ? '#ff4d5e' : '#ffd12a'; g.fillRect(418, 108, 84 * Math.max(0, st.fuel), 6);
+    g.fillStyle = '#5a6070'; g.font = 'bold 8px sans-serif'; g.textAlign = 'left'; g.fillText('FUEL', 418, 104);
   }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
 }
 
-// Formula steering display: a small screen with a shift-light strip.
-function wheelDisplayTexture() {
-  const c = document.createElement('canvas');
-  c.width = 256; c.height = 128;
-  const g = c.getContext('2d');
+// Formula steering display: a shift-light strip that fills with the revs, the
+// gear, and the DRS / rain status.
+export function drawWheelDisplay(g, st) {
   g.fillStyle = '#0b0d12'; g.fillRect(0, 0, 256, 128);
   const cols = ['#2ee6a8', '#2ee6a8', '#2ee6a8', '#ffd12a', '#ffd12a', '#ffd12a', '#ff4d5e', '#ff4d5e', '#38b6ff', '#38b6ff'];
-  cols.forEach((col, k) => { g.fillStyle = k < 7 ? col : '#2a2d35'; g.beginPath(); g.arc(20 + k * 24, 18, 8, 0, Math.PI * 2); g.fill(); });
-  g.fillStyle = '#e8ecf4'; g.font = 'bold 44px sans-serif'; g.textAlign = 'center'; g.fillText('7', 128, 88);
-  g.font = 'bold 14px sans-serif'; g.fillStyle = '#8b94a7'; g.textAlign = 'left'; g.fillText('DIFF 6', 14, 110); g.textAlign = 'right'; g.fillText('BB 56.2', 242, 110);
-  g.fillText('ERS', 242, 60); g.textAlign = 'left'; g.fillText('MODE 3', 14, 60);
+  const lit = Math.round(Math.max(0, Math.min(1, (st.rpm - 0.3) / 0.7)) * 10);
+  cols.forEach((col, k) => { g.fillStyle = k < lit ? col : '#2a2d35'; g.beginPath(); g.arc(20 + k * 24, 18, 8, 0, Math.PI * 2); g.fill(); });
+  g.fillStyle = '#e8ecf4'; g.font = 'bold 44px sans-serif'; g.textAlign = 'center'; g.fillText(String(st.gear), 128, 88);
+  g.font = 'bold 14px sans-serif'; g.fillStyle = st.drs ? '#2ee6a8' : '#8b94a7'; g.textAlign = 'left'; g.fillText(st.drs ? 'DRS OPEN' : 'DRS', 14, 60);
+  g.fillStyle = st.wet ? '#38b6ff' : '#8b94a7'; g.textAlign = 'right'; g.fillText(st.wet ? 'WET' : 'DRY', 242, 60);
+  g.fillStyle = '#8b94a7'; g.textAlign = 'left'; g.fillText(`LAP ${st.lap}/${st.laps}`, 14, 110);
+  g.textAlign = 'right'; g.fillText(`${Math.round(st.speed * 3.6)} KM/H`, 242, 110);
+  g.fillStyle = st.braking ? '#ff4d5e' : '#2a2d35'; g.beginPath(); g.arc(128, 112, 6, 0, Math.PI * 2); g.fill();
+}
+
+function liveCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  return t;
+  return { g: c.getContext('2d'), tex: t };
 }
 
 function steeringWheel(spec) {
@@ -148,7 +172,10 @@ function steeringWheel(spec) {
     g.add(grip(-r * 1.15), grip(r * 1.15));
     g.add(box(r * 2.3, 0.05, 0.03, MAT.wheel, 0, r * 0.62, 0));
     g.add(box(r * 2.3, 0.05, 0.03, MAT.wheel, 0, -r * 0.62, 0));
-    const disp = new THREE.Mesh(new THREE.PlaneGeometry(r * 1.7, r * 0.95), new THREE.MeshBasicMaterial({ map: wheelDisplayTexture() }));
+    const live = liveCanvas(256, 128);
+    drawWheelDisplay(live.g, { rpm: 0, gear: 1, speed: 0, lap: 1, laps: 3 });
+    g.userData.display = live;
+    const disp = new THREE.Mesh(new THREE.PlaneGeometry(r * 1.7, r * 0.95), new THREE.MeshBasicMaterial({ map: live.tex }));
     disp.position.z = -0.012; disp.rotation.y = Math.PI; // faces the driver (-Z)
     g.add(disp);
     g.add(box(r * 1.9, r * 1.1, 0.02, MAT.carbon, 0, 0, 0));
@@ -170,6 +197,14 @@ function steeringWheel(spec) {
   g.position.set(spec.x, spec.y, spec.z);
   g.rotation.x = spec.tilt; // top of the wheel leans away from the driver
   return g;
+}
+
+// Redraw the kit's instruments from the car's state (call a few times a second).
+export function updateInstruments(kit, st) {
+  const d = kit.userData.dash;
+  if (d) { drawDash(d.g, d.style, st); d.tex.needsUpdate = true; }
+  const w = kit.userData.display;
+  if (w) { drawWheelDisplay(w.g, st); w.tex.needsUpdate = true; }
 }
 
 export function buildCockpitKit(vehicle) {
@@ -198,7 +233,10 @@ export function buildCockpitKit(vehicle) {
     // Dashboard: a slab with the instrument face toward the driver.
     const D = C.dash;
     kit.add(box(halfW * 2 - 0.1, D.h, D.depth, MAT.trim, 0, D.y, D.z));
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(halfW * 1.1, D.h * 0.9), new THREE.MeshBasicMaterial({ map: dashTexture(D.style) }));
+    const live = liveCanvas(512, 128);
+    drawDash(live.g, D.style, { speed: 0, rpm: 0, gear: 1, gears: 6, lap: 1, laps: 3, fuel: 1 });
+    kit.userData.dash = { ...live, style: D.style };
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(halfW * 1.1, D.h * 0.9), new THREE.MeshBasicMaterial({ map: live.tex }));
     face.position.set(C.wheel.x, D.y + 0.005, D.z - D.depth / 2 - 0.005);
     face.rotation.y = Math.PI; // toward -Z, the driver
     face.rotation.x = -0.25;
@@ -254,6 +292,7 @@ export function buildCockpitKit(vehicle) {
   if (C.wheel) {
     const w = steeringWheel(C.wheel);
     w.name = 'wheel';
+    if (w.userData.display) kit.userData.display = w.userData.display;
     kit.add(w);
     // Steering column.
     if (!C.open) kit.add(bar([C.wheel.x, C.wheel.y - 0.02, C.wheel.z], [C.wheel.x, C.dash.y - 0.05, C.dash.z - C.dash.depth / 2], 0.03, MAT.trim));

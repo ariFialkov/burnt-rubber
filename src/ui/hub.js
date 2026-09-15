@@ -97,7 +97,7 @@ export function updateHub(ctx, states) {
     }).join('');
     patch(t, 'tt-board-title', boardTitle);
     patch(t, 'tt-rows', rows);
-    patch(t, 'tt-race', `${s.race.track.name} · ${s.race.track.loc}`);
+    patch(t, 'tt-race', `${s.race.track.name} · ${s.race.track.loc}${s.race.wet ? ' · 🌧' : ''}`);
     // Long and short forms; the stylesheet picks one for the screen width.
     const two = (full, short) => `<span class="tt-full">${full}</span><span class="tt-short">${short}</span>`;
     patch(t, 'tt-status',

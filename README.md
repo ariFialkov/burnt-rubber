@@ -216,6 +216,19 @@ off the rear wheel as the race goes green. Orientation always comes from an
 explicit forward/up basis, never a minimal rotation, which is what used to
 flip cars over where a road dipped.
 
+**Moving parts.** Front wheels steer into the road ahead and whatever the
+car is steering across, straightening as the tail comes round in a drift.
+Rally cars and trophy trucks carry brake lights that come on under
+deceleration and into sharp bends; the formula car has a single rain light
+that flashes only in the wet, and the bike one that stays on in the wet
+(a share of races run wet — a grey, close day — drawn per race from the
+seed). The formula car's rear-wing flap is its own hinged node from the
+model pipeline and swings open on hydraulics above 90% of cruise speed
+(DRS), shutting again below it. In the driver's view the instruments are
+live: needles follow speed and revs, the gear steps with speed, the lap
+and fuel count down, warning lamps light for braking, rain and low fuel,
+and the formula wheel's shift lights fill with the revs and show DRS.
+
 Cars don't pass through each other: each carries a collision footprint and a
 separation pass keeps the field apart. It works in track space (offset along
 the track vs. across it) rather than 3D, so it stays cheap even with 40 Baja

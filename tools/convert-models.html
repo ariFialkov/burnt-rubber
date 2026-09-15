@@ -135,6 +135,14 @@
     const wheels = wheelish.slice(0, wheelCount);
     wheels.forEach((s) => roles.set(s, 'wheel'));
 
+    // Formula: the rear wing's upper element — a thin, wide plate at the top
+    // of the wing — is the DRS flap, its own node hinged at its leading edge.
+    let drsPivot = null;
+    if (wheelCount === 4 && model.drs) {
+      const flap = shells.find((s) => !roles.has(s) && s.center.z < -1.9 && s.center.y > 1.05 && s.center.y < 1.25 && s.size.y < 0.1 && s.size.x > 1.4);
+      if (flap) { roles.set(flap, 'drs'); drsPivot = new THREE.Vector3(0, flap.box.max.y, flap.box.max.z); }
+    }
+
     // Bikes: the paddock stand is everything that reaches the ground behind
     // the rear axle (the base and its uprights). It becomes its own node,
     // hinged at the axle, so it can swing up on the start.
@@ -165,7 +173,7 @@
       else if (s.center.y > H * 0.62) roles.set(s, 'glass');                    // cabin glazing
       else roles.set(s, 'primary');
     });
-    return { roles, wheels, standPivot };
+    return { roles, wheels, standPivot, drsPivot };
   }
 
   const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
@@ -265,7 +273,8 @@
 
     const shells = splitShells(geo);
     if (vehicle === 'stock') size.drop = (s) => s.size.x < 0.1 && Math.abs(s.center.x) < 0.06 && s.center.y > 0.9 && s.center.y < 1.5 && s.center.z > 0.25 && s.center.z < 1.1;
-    const { roles, wheels, standPivot } = classify(shells, size, cfg.wheels || 4);
+    if (vehicle === 'formula') size.drs = true;
+    const { roles, wheels, standPivot, drsPivot } = classify(shells, size, cfg.wheels || 4);
 
     const root = new THREE.Group();
     root.name = vehicle;
@@ -277,8 +286,8 @@
     }
     const partTris = {};
     for (const [r, list] of Object.entries(byRole)) {
-      // The stand is built around its hinge so it can rotate in place.
-      const pivot = r === 'stand' ? standPivot : null;
+      // The stand and the DRS flap are built around their hinges so they can rotate in place.
+      const pivot = r === 'stand' ? standPivot : r === 'drs' ? drsPivot : null;
       const m = new THREE.Mesh(gather(geo, list, pivot || undefined), PALETTE[r] || PALETTE.dark);
       m.name = r;
       if (pivot) m.position.copy(pivot);

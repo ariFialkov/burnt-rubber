@@ -240,7 +240,7 @@ export function updateLive(ctx) {
     $('finish-card').classList.add('hidden');
   }
 
-  $('live-race').textContent = `${race.tour.name} — ${race.track.name} · ${race.track.loc}`;
+  $('live-race').textContent = `${race.tour.name} — ${race.track.name} · ${race.track.loc}${race.wet ? ' · 🌧 WET' : ''}`;
   const selR = race.field[clamp(ctx.selectedCarIdx, 0, race.field.length - 1)];
   $('car-name').textContent = `#${selR.number} ${selR.short}`;
 

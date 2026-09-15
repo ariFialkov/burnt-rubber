@@ -41,6 +41,10 @@ const SHARED = {
   screen: new THREE.MeshStandardMaterial({ color: 0xc4d9ec, metalness: 0.5, roughness: 0.08, transparent: true, opacity: 0.26, depthWrite: false, side: THREE.DoubleSide }),
   interior: new THREE.MeshStandardMaterial({ color: 0x0f1115, metalness: 0.1, roughness: 0.95 }),
   suit: new THREE.MeshStandardMaterial({ color: 0x1c1e24, metalness: 0.05, roughness: 0.85 }),
+  // Tail lights: an unlit lens, dark when off and bright when lit (swapped
+  // per car, so every car shares these two).
+  lampOff: new THREE.MeshBasicMaterial({ color: 0x3a0c10 }),
+  lampOn: new THREE.MeshBasicMaterial({ color: 0xff2a2a }),
   dark: new THREE.MeshStandardMaterial({ color: 0x23262c, metalness: 0.25, roughness: 0.65 }),
   wheel: new THREE.MeshStandardMaterial({ color: 0x141618, metalness: 0.05, roughness: 0.9 }),
 };
@@ -406,6 +410,29 @@ export function buildModelCar(vehicle, colors) {
       group.add(block);
     }
   }
+  // Tail lights, per class: brake lights on the rally car and truck (two
+  // lenses at the rear corners), a single round rain light on the formula car
+  // and the bike. The stock car has none.
+  const L = t.meta.length / 2, Hh = t.meta.height, Wd = t.meta.width / 2;
+  const lamps = [];
+  const lamp = (geometry, x, y, z) => {
+    const m = new THREE.Mesh(geometry, SHARED.lampOff);
+    m.position.set(x, y, z);
+    m.name = 'lamp';
+    group.add(m);
+    lamps.push(m);
+  };
+  if (vehicle === 'rally' || vehicle === 'baja') {
+    const geo = new THREE.BoxGeometry(0.16, 0.07, 0.04);
+    const y = vehicle === 'baja' ? Hh * 0.6 : Hh * 0.56;
+    lamp(geo, Wd * 0.62, y, -L + 0.01);
+    lamp(geo, -Wd * 0.62, y, -L + 0.01);
+  } else if (vehicle === 'formula' || vehicle === 'moto') {
+    const r = vehicle === 'formula' ? 0.065 : 0.045;
+    const geo = new THREE.CylinderGeometry(r, r, 0.04, 14);
+    geo.rotateX(Math.PI / 2);
+    lamp(geo, 0, vehicle === 'formula' ? 0.56 : Hh * 0.6, -L + (vehicle === 'formula' ? 0.06 : 0.02));
+  }
   group.add(shadowBlob(t.meta.width, t.meta.length));
-  return { group, wheels, meta: t.meta };
+  return { group, wheels, lamps, meta: t.meta };
 }

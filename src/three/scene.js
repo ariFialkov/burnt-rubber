@@ -6,7 +6,7 @@ import { rngFor, clamp, lerp, smoothstep } from '../core/rng.js';
 import { buildTrack } from './trackGen.js';
 import { buildCar, carLabel, positionBadge, COLLIDERS } from './carFactory.js';
 import { buildModelCar, modelMeta, shadowBlob, eyeFor } from './models.js';
-import { buildCockpitKit, cockpitFor } from './cockpit.js';
+import { buildCockpitKit, cockpitFor, updateInstruments } from './cockpit.js';
 import { getScript, getFocusLayer, GRID_OFFSET } from '../engine/script.js';
 
 const FWD = new THREE.Vector3(0, 0, 1);
@@ -55,11 +55,16 @@ export class RaceScene {
     const track = buildTrack(race, this.script);
     this.track = track;
     this.scene.add(track.group);
-    this.scene.background = new THREE.Color(track.theme.sky);
-    this.scene.fog = new THREE.Fog(track.theme.fog, 250, Math.max(700, this.script.lapLen * 0.85));
+    // A wet race is a grey day: sky and fog darken and close in, the sun
+    // goes flat.
+    const grey = new THREE.Color(0x6f7680);
+    const sky = new THREE.Color(track.theme.sky), fogC = new THREE.Color(track.theme.fog);
+    if (race.wet) { sky.lerp(grey, 0.7); fogC.lerp(grey, 0.65); }
+    this.scene.background = sky;
+    this.scene.fog = new THREE.Fog(fogC, race.wet ? 120 : 250, Math.max(700, this.script.lapLen * 0.85) * (race.wet ? 0.6 : 1));
 
-    this.scene.add(new THREE.HemisphereLight(0xe8f0ff, 0x50483a, 1.05));
-    const sun = new THREE.DirectionalLight(0xfff2d8, 1.6);
+    this.scene.add(new THREE.HemisphereLight(0xe8f0ff, 0x50483a, race.wet ? 0.8 : 1.05));
+    const sun = new THREE.DirectionalLight(race.wet ? 0xd8dde6 : 0xfff2d8, race.wet ? 0.7 : 1.6);
     sun.position.set(200, 320, 120);
     this.scene.add(sun);
 
@@ -89,6 +94,8 @@ export class RaceScene {
         return { ...c, meta: null };
       })();
       const { group, wheels } = built;
+      // Front wheels steer: yaw first, then the spin about the axle.
+      for (const w of wheels) { w.rotation.order = 'YXZ'; w.userData.front = w.position.z > 0; }
       const height = built.meta ? built.meta.height : (race.tour.vehicle === 'baja' ? 3.4 : 2.4);
       const length = built.meta ? built.meta.length : this.col.len * 2;
       const sprite = carLabel(r, race.tour.accent);
@@ -109,6 +116,9 @@ export class RaceScene {
         stand: group.getObjectByName('stand') || null,
         rider: riderObj,
         driver: group.getObjectByName('driver') || null,
+        lamps: built.lamps || [],
+        drs: group.getObjectByName('drs') || null,
+        steer: 0, braking: false, brakeHold: 0, drsOpen: false, drsAng: 0, dashTimer: rand(),
         interior: group.getObjectByName('interior') || null,
         bodyMeshes: ['primary', 'secondary', 'dark'].map((n) => group.getObjectByName(n)).filter(Boolean),
         // Body state: suspension roll/pitch (with their velocities), drift
@@ -141,6 +151,9 @@ export class RaceScene {
     this.rankTimer = 0;
     this.kit = null;   // the driver's-eye interior, built on first use
     this.kitOn = -1;   // which car carries it
+    // Tail-light lens materials, shared by every car: dark and lit.
+    this.lampOff = this.cars.find((c) => c.lamps.length)?.lamps[0].material || new THREE.MeshBasicMaterial({ color: 0x3a0c10 });
+    this.lampOn = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
     this.leaderIdx = 0;
     this.backIdx = 0;
     this.centroid = new THREE.Vector3();
@@ -566,6 +579,42 @@ export class RaceScene {
       car.group.rotateX(car.pitch);  // nose up under acceleration
     }
 
+    // Steering: the front wheels turn into the road ahead and whatever the
+    // car is steering across, and straighten (or counter-steer) as the tail
+    // comes round in a drift. Bikes steer by leaning.
+    if (vehicle !== 'moto') {
+      const steerTarget = clamp(turn * 1.0 + car.yaw * 1.2 + car.drift * 1.0, -0.45, 0.45);
+      car.steer += (steerTarget - car.steer) * Math.min(1, 9 * dt);
+      for (const w of car.wheels) if (w.userData.front) w.rotation.y = -car.steer; // +Y turns the nose left
+    }
+
+    // Brake lights: on under deceleration or when a sharp bend is coming at
+    // speed, held a beat so they read. The formula car's single light is a
+    // rain light that flashes only in the wet; the bike's stays on in the wet.
+    if (car.lamps.length) {
+      const sharp = Math.abs(turn) > 0.22 && v > this.script.pace.cruise * 0.45;
+      const braking = racing && (car.lonAcc < -1.5 || sharp);
+      if (braking) car.brakeHold = 0.35; else car.brakeHold = Math.max(0, car.brakeHold - dt);
+      car.braking = car.brakeHold > 0;
+      let lit;
+      if (vehicle === 'formula') lit = this.race.wet && racing && Math.floor(t * 4) % 2 === 0;
+      else if (vehicle === 'moto') lit = this.race.wet && racing;
+      else lit = car.braking;
+      const mat = lit ? this.lampOn : this.lampOff;
+      for (const l of car.lamps) if (l.material !== mat) l.material = mat;
+    }
+
+    // DRS: the rear flap swings open above the activation speed and shuts
+    // again below it, on hydraulics rather than instantly.
+    if (car.drs) {
+      const cruise = this.script.pace.cruise;
+      if (!car.drsOpen && racing && v > cruise * 0.9 && t > 6) car.drsOpen = true;
+      else if (car.drsOpen && (!racing || v < cruise * 0.82)) car.drsOpen = false;
+      const target = car.drsOpen ? 0.78 : 0;
+      car.drsAng += clamp(target - car.drsAng, -4.5 * dt, 4.5 * dt);
+      car.drs.rotation.x = car.drsAng; // trailing edge lifts
+    }
+
     // Wheels: spin with the road (capped where a frame rate can't show it),
     // and on gravel each one works its own bumps — slow and big at a crawl,
     // fast and small at speed — while the body rides level above them.
@@ -589,6 +638,23 @@ export class RaceScene {
         const target = clamp(turn * 3 + car.yaw * 4, -1.2, 1.2);
         wheel.rotation.z += (target - wheel.rotation.z) * Math.min(1, 10 * dt);
         this.driveHands(car, wheel.rotation.z, dt);
+      }
+      // Instruments: a few redraws a second from the car's state.
+      car.dashTimer -= dt;
+      if (car.dashTimer <= 0) {
+        car.dashTimer = 1 / 12;
+        const cruise = this.script.pace.cruise;
+        const gears = vehicle === 'formula' ? 8 : 6;
+        const x = Math.max(0.02, Math.min(0.999, v / (cruise * 1.08))) * gears;
+        const gear = Math.max(1, Math.min(gears, Math.ceil(x)));
+        const rpm = racing ? 0.35 + 0.6 * (x - (gear - 1)) + 0.02 * Math.sin(t * 37) : 0.12 + 0.02 * Math.sin(t * 20);
+        const laps = this.race.tour.laps;
+        const lap = clamp(Math.floor(car.dist / this.script.lapLen) + 1, 1, laps);
+        updateInstruments(this.kit, {
+          speed: v, rpm, gear, gears, braking: car.braking, wet: !!this.race.wet, drs: car.drsOpen,
+          lap, laps, fuel: 1 - 0.85 * clamp(t / (this.script.T + 8), 0, 1), blink: Math.floor(t * 2) % 2 === 0,
+          t, progress: clamp(car.dist / this.script.totalDist, 0, 1),
+        });
       }
     }
   }

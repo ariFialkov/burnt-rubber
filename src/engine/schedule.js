@@ -39,6 +39,10 @@ export function raceFor(tourId, cycle) {
   // identically every time out.
   const weights = field.map((r) => r.strength * (0.75 + rand() * 0.5));
 
+  // Weather: a share of races run wet (rain lights on, a darker day); the
+  // desert tour rarely sees it.
+  const wet = rngFor('weather-v1', tourId, String(cycle))() < (tour.vehicle === 'baja' ? 0.08 : 0.24);
+
   const race = {
     key,
     tourId,
@@ -47,6 +51,7 @@ export function raceFor(tourId, cycle) {
     track,
     field,
     weights,
+    wet,
     purse: pick(rand, PURSES),
     trackSeed: `${tourId}-${track.name}`,
     label: `${track.name} · ${track.loc}`,
