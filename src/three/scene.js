@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { rngFor, clamp, lerp, smoothstep } from '../core/rng.js';
 import { buildTrack } from './trackGen.js';
 import { buildCar, carLabel, positionBadge, COLLIDERS } from './carFactory.js';
-import { buildModelCar, modelMeta, shadowBlob, eyeFor } from './models.js';
+import { buildModelCar, modelMeta, shadowBlob, eyeFor, LAMP } from './models.js';
 import { buildCockpitKit, cockpitFor, updateInstruments } from './cockpit.js';
 import { getScript, getFocusLayer, GRID_OFFSET } from '../engine/script.js';
 
@@ -119,6 +119,7 @@ export class RaceScene {
         lamps: built.lamps || [],
         drs: group.getObjectByName('drs') || null,
         steer: 0, braking: false, brakeHold: 0, drsOpen: false, drsAng: 0, dashTimer: rand(),
+        needleSpeed: 0, needleRpm: 0.1, gear: 1,
         interior: group.getObjectByName('interior') || null,
         bodyMeshes: ['primary', 'secondary', 'dark'].map((n) => group.getObjectByName(n)).filter(Boolean),
         // Body state: suspension roll/pitch (with their velocities), drift
@@ -151,9 +152,7 @@ export class RaceScene {
     this.rankTimer = 0;
     this.kit = null;   // the driver's-eye interior, built on first use
     this.kitOn = -1;   // which car carries it
-    // Tail-light lens materials, shared by every car: dark and lit.
-    this.lampOff = this.cars.find((c) => c.lamps.length)?.lamps[0].material || new THREE.MeshBasicMaterial({ color: 0x3a0c10 });
-    this.lampOn = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+
     this.leaderIdx = 0;
     this.backIdx = 0;
     this.centroid = new THREE.Vector3();
@@ -600,8 +599,8 @@ export class RaceScene {
       if (vehicle === 'formula') lit = this.race.wet && racing && Math.floor(t * 4) % 2 === 0;
       else if (vehicle === 'moto') lit = this.race.wet && racing;
       else lit = car.braking;
-      const mat = lit ? this.lampOn : this.lampOff;
-      for (const l of car.lamps) if (l.material !== mat) l.material = mat;
+      const mat = lit ? LAMP.on : LAMP.off;
+      for (const l of car.lamps) { if (l.lens.material !== mat) l.lens.material = mat; l.glow.visible = lit; }
     }
 
     // DRS: the rear flap swings open above the activation speed and shuts
@@ -639,19 +638,30 @@ export class RaceScene {
         wheel.rotation.z += (target - wheel.rotation.z) * Math.min(1, 10 * dt);
         this.driveHands(car, wheel.rotation.z, dt);
       }
-      // Instruments: a few redraws a second from the car's state.
+      // Instruments. The needles are physical: they chase the car's state
+      // through their own time constants every frame (a gear change drops
+      // the revs, which then climb again), and the face is redrawn at 30 Hz.
+      const cruise = this.script.pace.cruise;
+      const gears = vehicle === 'formula' ? 8 : 6;
+      const x = Math.max(0.02, Math.min(0.999, v / (cruise * 1.08))) * gears;
+      // Hysteresis on the gear so it never chatters at a boundary.
+      const up = Math.ceil(x), down = Math.ceil(x + 0.12);
+      if (up > car.gear) car.gear = up; else if (down < car.gear) car.gear = down;
+      car.gear = Math.max(1, Math.min(gears, car.gear));
+      const rpmTarget = racing ? 0.32 + 0.62 * clamp(x - (car.gear - 1), 0, 1.05) : 0.1;
+      // A fresh instrument (the camera just arrived) starts on the reading
+      // rather than sweeping up from zero.
+      if (car.needleFresh === undefined) { car.needleSpeed = v; car.needleRpm = rpmTarget; car.needleFresh = false; }
+      car.needleSpeed += (v - car.needleSpeed) * (1 - Math.exp(-dt / 0.25));
+      car.needleRpm += (rpmTarget - car.needleRpm) * (1 - Math.exp(-dt / 0.16));
       car.dashTimer -= dt;
       if (car.dashTimer <= 0) {
-        car.dashTimer = 1 / 12;
-        const cruise = this.script.pace.cruise;
-        const gears = vehicle === 'formula' ? 8 : 6;
-        const x = Math.max(0.02, Math.min(0.999, v / (cruise * 1.08))) * gears;
-        const gear = Math.max(1, Math.min(gears, Math.ceil(x)));
-        const rpm = racing ? 0.35 + 0.6 * (x - (gear - 1)) + 0.02 * Math.sin(t * 37) : 0.12 + 0.02 * Math.sin(t * 20);
+        car.dashTimer = 1 / 30;
         const laps = this.race.tour.laps;
         const lap = clamp(Math.floor(car.dist / this.script.lapLen) + 1, 1, laps);
         updateInstruments(this.kit, {
-          speed: v, rpm, gear, gears, braking: car.braking, wet: !!this.race.wet, drs: car.drsOpen,
+          speed: car.needleSpeed, rpm: car.needleRpm + 0.006 * Math.sin(t * 9), gear: car.gear, gears,
+          braking: car.braking, wet: !!this.race.wet, drs: car.drsOpen,
           lap, laps, fuel: 1 - 0.85 * clamp(t / (this.script.T + 8), 0, 1), blink: Math.floor(t * 2) % 2 === 0,
           t, progress: clamp(car.dist / this.script.totalDist, 0, 1),
         });

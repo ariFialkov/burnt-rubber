@@ -41,13 +41,34 @@ const SHARED = {
   screen: new THREE.MeshStandardMaterial({ color: 0xc4d9ec, metalness: 0.5, roughness: 0.08, transparent: true, opacity: 0.26, depthWrite: false, side: THREE.DoubleSide }),
   interior: new THREE.MeshStandardMaterial({ color: 0x0f1115, metalness: 0.1, roughness: 0.95 }),
   suit: new THREE.MeshStandardMaterial({ color: 0x1c1e24, metalness: 0.05, roughness: 0.85 }),
-  // Tail lights: an unlit lens, dark when off and bright when lit (swapped
-  // per car, so every car shares these two).
-  lampOff: new THREE.MeshBasicMaterial({ color: 0x3a0c10 }),
-  lampOn: new THREE.MeshBasicMaterial({ color: 0xff2a2a }),
+  // Tail lights: a domed lens, dark when off and blazing when lit (swapped
+  // per car, so every car shares these), plus an additive glow behind it.
+  lampOff: new THREE.MeshStandardMaterial({ color: 0x2a0508, emissive: 0x3a0a0e, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.1 }),
+  lampOn: new THREE.MeshStandardMaterial({ color: 0xff2020, emissive: 0xff1a1a, emissiveIntensity: 2.5, roughness: 0.3, metalness: 0.1, toneMapped: false }),
   dark: new THREE.MeshStandardMaterial({ color: 0x23262c, metalness: 0.25, roughness: 0.65 }),
   wheel: new THREE.MeshStandardMaterial({ color: 0x141618, metalness: 0.05, roughness: 0.9 }),
 };
+
+export const LAMP = { on: SHARED.lampOn, off: SHARED.lampOff };
+
+// Radial glow for a lit lamp, drawn once.
+let glowMat = null;
+function lampGlow() {
+  if (!glowMat) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,120,110,1)');
+    grad.addColorStop(0.35, 'rgba(255,40,40,0.55)');
+    grad.addColorStop(1, 'rgba(255,0,0,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    glowMat = new THREE.SpriteMaterial({ map: tex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.9, toneMapped: false });
+  }
+  return glowMat;
+}
 
 // Reflections for the paint. Set once from the renderer (PMREM of a room).
 export function setCarEnvironment(tex) {
@@ -415,23 +436,47 @@ export function buildModelCar(vehicle, colors) {
   // and the bike. The stock car has none.
   const L = t.meta.length / 2, Hh = t.meta.height, Wd = t.meta.width / 2;
   const lamps = [];
-  const lamp = (geometry, x, y, z) => {
-    const m = new THREE.Mesh(geometry, SHARED.lampOff);
-    m.position.set(x, y, z);
-    m.name = 'lamp';
-    group.add(m);
-    lamps.push(m);
+  // Each lamp is seated on the bodywork: a ray from behind the car finds the
+  // rear surface at the lamp's (x, y), so the lens sits flush wherever that
+  // panel actually is, not on the bounding box.
+  group.updateMatrixWorld(true);
+  const bodies = group.children.filter((o) => o.isMesh && ['primary', 'secondary', 'dark', 'glass'].includes(o.name));
+  const ray = new THREE.Raycaster();
+  const seat = (x, y, fallbackZ) => {
+    ray.set(new THREE.Vector3(x, y, -L - 3), new THREE.Vector3(0, 0, 1));
+    const h = ray.intersectObjects(bodies, false)[0];
+    return h ? h.point.z : fallbackZ;
+  };
+  const lamp = (geometry, x, y, glowSize) => {
+    const holder = new THREE.Group();
+    holder.position.set(x, y, seat(x, y, -L) + 0.004);
+    const lens = new THREE.Mesh(geometry, SHARED.lampOff);
+    lens.name = 'lamp';
+    holder.add(lens);
+    const glow = new THREE.Sprite(lampGlow());
+    glow.scale.set(glowSize, glowSize, 1);
+    glow.position.z = -0.03;
+    glow.visible = false;
+    holder.add(glow);
+    group.add(holder);
+    lamps.push({ lens, glow });
   };
   if (vehicle === 'rally' || vehicle === 'baja') {
-    const geo = new THREE.BoxGeometry(0.16, 0.07, 0.04);
-    const y = vehicle === 'baja' ? Hh * 0.6 : Hh * 0.56;
-    lamp(geo, Wd * 0.62, y, -L + 0.01);
-    lamp(geo, -Wd * 0.62, y, -L + 0.01);
+    // A domed rectangular lens, its back face in the panel.
+    const geo = new THREE.SphereGeometry(1, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+    geo.rotateX(-Math.PI / 2); // dome toward -Z
+    geo.scale(0.085, 0.04, 0.03);
+    // Truck: on the tailgate panel; rally car: on the tail panel under the wing.
+    const y = vehicle === 'baja' ? Hh * 0.6 : 0.78;
+    lamp(geo, Wd * 0.62, y, 0.42);
+    lamp(geo, -Wd * 0.62, y, 0.42);
   } else if (vehicle === 'formula' || vehicle === 'moto') {
     const r = vehicle === 'formula' ? 0.065 : 0.045;
-    const geo = new THREE.CylinderGeometry(r, r, 0.04, 14);
-    geo.rotateX(Math.PI / 2);
-    lamp(geo, 0, vehicle === 'formula' ? 0.56 : Hh * 0.6, -L + (vehicle === 'formula' ? 0.06 : 0.02));
+    const geo = new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+    geo.rotateX(-Math.PI / 2);
+    geo.scale(r, r, r * 0.55);
+    // Formula: on the rear crash structure under the wing; bike: on the tail unit.
+    lamp(geo, 0, vehicle === 'formula' ? 0.56 : Hh * 0.78, vehicle === 'formula' ? 0.36 : 0.26);
   }
   group.add(shadowBlob(t.meta.width, t.meta.length));
   return { group, wheels, lamps, meta: t.meta };
