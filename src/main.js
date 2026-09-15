@@ -61,6 +61,7 @@ function sceneFor(race) {
 // --- App context ------------------------------------------------------------
 const ctx = {
   view: 'hub',
+  canvas,
   hubIdx: 0,
   boardTourId: null,
   liveTourId: null,
@@ -122,6 +123,7 @@ function toast(msg, cls = '') {
 }
 
 // --- Boot -------------------------------------------------------------------
+window.__br = ctx; // for headless harnesses
 initHub(ctx);
 initSlip(ctx);
 initBoard(ctx);

@@ -1,6 +1,7 @@
 // Live broadcast HUD: position tower, camera bar, event feed, in-race popup
 // bets, live bet status, and the results overlay.
 
+import * as THREE from 'three';
 import { tourState } from '../engine/schedule.js';
 import { getScript, getFocusLayer } from '../engine/script.js';
 import { RTP, fmtOdds } from '../engine/odds.js';
@@ -48,6 +49,80 @@ export function initLive(ctx) {
   $('live-race').parentElement.addEventListener('click', () => {
     const st = tourState(ctxRef.liveTourId);
     if (st.phase === 'betting') ctxRef.showView('board', ctxRef.liveTourId);
+  });
+  initPicking(ctx);
+}
+
+// Click-to-follow: a tap on any car in view — its body or the label over it
+// — puts the camera on that car. Onboard views keep their view and change
+// the driver; the cinematic and chopper cameras cut to 3rd person.
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const tmp = new THREE.Vector3();
+let press = null;
+
+function carAt(clientX, clientY) {
+  const scene = ctxRef.currentScene;
+  if (!scene) return -1;
+  const cam = ctxRef.rig.camera;
+  const rect = ctxRef.canvas.getBoundingClientRect();
+  const x = (clientX - rect.left) / rect.width, y = (clientY - rect.top) / rect.height;
+  // The body or label under the pointer first. The car being ridden onboard
+  // (its label is hidden) is not a target: its own body fills the frame.
+  ndc.set(x * 2 - 1, -(y * 2 - 1));
+  raycaster.setFromCamera(ndc, cam);
+  const targets = scene.cars.filter((c) => c.sprite.visible).map((c) => c.group);
+  for (const h of raycaster.intersectObjects(targets, true)) {
+    let o = h.object;
+    while (o && o.userData.carIdx === undefined) o = o.parent;
+    if (o && (h.object.visible || h.object.isMesh)) return o.userData.carIdx;
+  }
+  // ...else the nearest label on screen within a thumb's reach, so a far car
+  // under the chopper is still an easy target.
+  let best = -1, bestD = 44 * 44;
+  for (let i = 0; i < scene.cars.length; i++) {
+    const c = scene.cars[i];
+    if (!c.sprite.visible) continue;
+    c.sprite.getWorldPosition(tmp).project(cam);
+    if (tmp.z > 1) continue; // behind the camera
+    const sx = (tmp.x + 1) / 2 * rect.width, sy = (1 - tmp.y) / 2 * rect.height;
+    const d = (sx - (clientX - rect.left)) ** 2 + (sy - (clientY - rect.top)) ** 2;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+export function followCar(idx) {
+  ctxRef.selectedCarIdx = idx;
+  const mode = ['chase', 'cockpit', 'hood'].includes(ctxRef.rig.mode) ? ctxRef.rig.mode : 'chase';
+  setCam(mode);
+}
+
+function initPicking(ctx) {
+  const canvas = ctx.canvas;
+  ctx.pickCar = carAt; // for harnesses
+  // The car is resolved at the moment of the press — cars keep moving under
+  // a finger, and the press is where the eye was.
+  canvas.addEventListener('pointerdown', (e) => {
+    if (ctx.view !== 'live') return;
+    press = { x: e.clientX, y: e.clientY, t: performance.now(), idx: carAt(e.clientX, e.clientY) };
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    if (!press || ctx.view !== 'live') { press = null; return; }
+    const moved = Math.hypot(e.clientX - press.x, e.clientY - press.y);
+    const held = performance.now() - press.t;
+    const idx = press.idx;
+    press = null;
+    if (moved > 10 || held > 600) return; // a drag or a hold, not a tap
+    if (idx >= 0) followCar(idx);
+  });
+  // Show a hand over a car so the mechanic is discoverable with a mouse.
+  let hoverTick = 0;
+  canvas.addEventListener('pointermove', (e) => {
+    if (ctx.view !== 'live' || e.pointerType === 'touch') return;
+    if (performance.now() - hoverTick < 80) return;
+    hoverTick = performance.now();
+    canvas.style.cursor = carAt(e.clientX, e.clientY) >= 0 ? 'pointer' : '';
   });
 }
 

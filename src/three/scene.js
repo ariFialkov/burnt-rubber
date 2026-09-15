@@ -98,6 +98,7 @@ export class RaceScene {
       group.add(badge.sprite);
       this.scene.add(group);
       const eye = eyeFor(race.tour.vehicle, height, length);
+      group.userData.carIdx = i; // for picking: a hit anywhere in the group resolves to this car
       for (const w of wheels) w.userData.restY = w.position.y;
       const riderObj = group.getObjectByName('rider');
       if (riderObj) riderObj.userData.seat = { x: riderObj.position.x, y: riderObj.position.y };

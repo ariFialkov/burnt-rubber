@@ -142,7 +142,10 @@ Five cameras:
 
 Every car carries a label — number, flag and name — with a separate position
 badge beside it that follows the leaderboard; the car being ridden onboard
-hides its own. When that car crosses the line, a finish card names the racer,
+hides its own. Tap any car in view — its body or its label — to follow it:
+the onboard views keep their view and change the driver, the cinematic and
+chopper cameras cut to 3rd person on it. (A drag is not a tap, so orbiting
+the view never changes the car.) When that car crosses the line, a finish card names the racer,
 their race time, gap to the winner and finishing position, while the camera
 bar stays live underneath so you can keep switching cars and views until the
 full results come up.
