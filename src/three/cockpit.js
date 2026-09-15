@@ -39,9 +39,10 @@ export const COCKPIT = {
   },
   baja: {
     eye: { x: 0.34, y: 1.68, z: -0.30 }, look: { down: 0.14 },
-    // The model's windscreen has a triangle wound inside-out that renders
-    // opaque from within; clip the whole windscreen region away in this view.
-    clip: { y0: 1.3, y1: 2.1, z0: 0.0, z1: 0.8 },
+    // The model's windscreen has a triangle wound inside-out on the right
+    // half that renders opaque from within; clip that half away in this view
+    // and keep the centre divider, which is part of the truck's look.
+    clip: { x0: -1.2, x1: -0.06, y0: 1.3, y1: 2.1, z0: 0.0, z1: 0.8 },
     cabin: { halfW: 0.98, floorY: 0.80, roofY: 1.98, backZ: -0.95, frontZ: 0.2, screenTopZ: 0.12, screenBaseZ: 0.6, screenBaseY: 1.38 },
     dash: { y: 1.34, z: 0.52, depth: 0.4, h: 0.18, style: 'baja' },
     wheel: { x: 0.34, y: 1.32, z: 0.18, r: 0.19, tilt: 0.35 },
@@ -53,6 +54,8 @@ export const COCKPIT = {
     // The windscreen is part of the fairing shell (up to y 1.27 half a metre
     // ahead of the eye); clip it out of the rider's view.
     clip: { y0: 1.02, y1: 1.6, z0: 0.36, z1: 0.9 },
+    // Where the grips are (bike frame), for the rider's hands.
+    grips: { x: 0.3, y: 1.03, z: 0.46 },
   },
 };
 

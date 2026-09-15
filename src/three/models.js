@@ -288,6 +288,31 @@ export function shadowBlob(width, length) {
 // Where the rider's hips sit on the bike, as fractions of the bike's height
 // and length (+Z forward), and the rider's standing height in metres.
 export const RIDER_SEAT = { y: 0.58, z: -0.10, height: 1.72, lean: 0.0 };
+// A figure from its template: the body, plus each arm as an upper arm
+// pivoted at the shoulder carrying a forearm pivoted at the elbow, so the
+// hands can be aimed at a wheel or grips. Joint fillers hide the bends.
+const JOINT = new THREE.SphereGeometry(0.045, 10, 8);
+function buildFigure(t, mat, name) {
+  const root = new THREE.Group();
+  root.name = name;
+  const meshes = {};
+  for (const [part, geometry] of Object.entries(t.parts)) {
+    const m = new THREE.Mesh(geometry, mat);
+    m.name = part;
+    if (t.pivots[part]) m.position.copy(t.pivots[part]);
+    meshes[part] = m;
+  }
+  for (const [part, m] of Object.entries(meshes)) (t.parents[part] ? meshes[t.parents[part]] : root).add(m);
+  for (const side of ['l', 'r']) {
+    const upper = meshes['arm_' + side], fore = meshes['fore_' + side];
+    if (!upper || !fore) continue;
+    upper.add(new THREE.Mesh(JOINT, SHARED.suit));
+    const e = new THREE.Mesh(JOINT, SHARED.suit); e.position.copy(fore.position); upper.add(e);
+  }
+  root.userData.arms = t.meta.arms || null;
+  return root;
+}
+
 // Seat the driver so the head lands on the driver camera's eye point.
 export const DRIVER_HEIGHT = 1.72;
 export function placeDriver(obj, C, meta) {
@@ -355,8 +380,7 @@ export function buildModelCar(vehicle, colors) {
     const rt = templates.get('rider');
     if (rt) {
       const mat = hasLivery('rider') ? liveryMaterial('rider', colors) : new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.1, roughness: 0.7, envMap });
-      const r = new THREE.Mesh(rt.parts.body, mat);
-      r.name = 'rider';
+      const r = buildFigure(rt, mat, 'rider');
       group.add(placeRider(r, t.meta));
     } else {
       group.add(rider(primary, secondary, t.meta));
@@ -369,27 +393,7 @@ export function buildModelCar(vehicle, colors) {
     const C = cockpitFor(vehicle);
     if (dt) {
       const mat = hasLivery('rider') ? liveryMaterial('rider', colors) : new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.1, roughness: 0.7, envMap });
-      // Body, plus each arm as an upper arm pivoted at the shoulder carrying
-      // a forearm pivoted at the elbow, so the hands can be aimed at the wheel.
-      const d = new THREE.Group();
-      d.name = 'driver';
-      const meshes = {};
-      for (const [name, geometry] of Object.entries(dt.parts)) {
-        const m = new THREE.Mesh(geometry, mat);
-        m.name = name;
-        if (dt.pivots[name]) m.position.copy(dt.pivots[name]);
-        meshes[name] = m;
-      }
-      for (const [name, m] of Object.entries(meshes)) (dt.parents[name] ? meshes[dt.parents[name]] : d).add(m);
-      // Joint fillers, so a bent elbow never opens a gap.
-      const joint = new THREE.SphereGeometry(0.045, 10, 8);
-      for (const side of ['l', 'r']) {
-        const upper = meshes['arm_' + side], fore = meshes['fore_' + side];
-        if (!upper || !fore) continue;
-        upper.add(new THREE.Mesh(joint, SHARED.suit));
-        const e = new THREE.Mesh(joint, SHARED.suit); e.position.copy(fore.position); upper.add(e);
-      }
-      d.userData.arms = dt.meta.arms || null;
+      const d = buildFigure(dt, mat, 'driver');
       placeDriver(d, C, dt.meta);
       group.add(d);
     }

@@ -179,7 +179,8 @@ export class RaceScene {
     // the planes are kept in world space by poseBody every frame.
     const clip = cockpitFor(this.race.tour.vehicle).clip;
     if (clip) {
-      this.clipPlanes = this.clipPlanes || [0, 1, 2, 3].map(() => new THREE.Plane());
+      const n = clip.x0 !== undefined ? 6 : 4;
+      this.clipPlanes = Array.from({ length: n }, () => new THREE.Plane());
       for (const m of car.bodyMeshes) { m.material.clippingPlanes = this.clipPlanes; m.material.clipIntersection = true; }
     }
   }
@@ -200,6 +201,7 @@ export class RaceScene {
     set(1, 0, 1, 0, 0, clip.y1, 0);
     set(2, 0, 0, -1, 0, 0, clip.z0);
     set(3, 0, 0, 1, 0, 0, clip.z1);
+    if (clip.x0 !== undefined) { set(4, -1, 0, 0, clip.x0, 0, 0); set(5, 1, 0, 0, clip.x1, 0, 0); }
   }
 
   setFocus(idx) {
@@ -540,6 +542,9 @@ export class RaceScene {
         car.rider.position.x = seat.x + side * 0.22 * f;
         car.rider.position.y = seat.y - 0.06 * f;
         car.rider.rotation.z = -side * 0.35 * f;
+        // Hands stay on the grips however far the body hangs off.
+        const G = B.grips || cockpitFor('moto').grips;
+        if (G) this.aimHands(car, car.rider, (side) => new THREE.Vector3(side === 'l' ? G.x : -G.x, G.y, G.z), 0, dt, { x: 0.6, y: -0.25, z: 0.05 });
       }
       // The paddock stand swings up off the rear wheel as the race goes green.
       if (car.stand) {
@@ -592,35 +597,42 @@ export class RaceScene {
   // the rim as it turns; past a certain angle they let go and re-grip further
   // round, hand over hand, as a driver does in a hard corner.
   driveHands(car, wheelRot, dt) {
-    const D = car.driver;
-    const A = D && D.userData.arms;
     const W = cockpitFor(this.race.tour.vehicle).wheel;
-    if (!A || !W) return;
-    const H = D.scale.x;
+    if (!car.driver || !W) return;
     const REGRIP = 1.1; // radians of wheel turn a grip lasts before the hand moves round
     const follow = wheelRot - Math.round(wheelRot / REGRIP) * REGRIP;
     const tiltQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), W.tilt);
+    // Grip point on the rim (car frame, where +X is the car's left): the
+    // left hand at ten o'clock, the right at two.
+    const grip = (side) => {
+      const phi = (side === 'l' ? Math.PI / 6 : Math.PI * 5 / 6) + follow;
+      return new THREE.Vector3(Math.cos(phi) * W.r, Math.sin(phi) * W.r, 0).applyQuaternion(tiltQ).add(new THREE.Vector3(W.x, W.y, W.z));
+    };
+    this.aimHands(car, car.driver, grip, 12, dt, { x: 0.25, y: -0.6, z: 0.1 });
+  }
+
+  // Aim a figure's hands at targets given in the car's frame. `rate` is how
+  // fast a hand moves to a new target (0 = at once); `pole` says which way
+  // the elbows go, in the figure's frame (mirrored for the right arm).
+  aimHands(car, D, targetFor, rate, dt, pole) {
+    const A = D.userData.arms;
+    if (!A) return;
+    D.updateMatrix();
+    const inv = new THREE.Matrix4().copy(D.matrix).invert();
     for (const side of ['l', 'r']) {
       const arm = D.getObjectByName('arm_' + side), fore = D.getObjectByName('fore_' + side);
       const J = A[side];
       if (!arm || !fore || !J) continue;
-      // Grip point on the rim (car frame, where +X is the car's left): the
-      // left hand at ten o'clock, the right at two.
-      const phi = (side === 'l' ? Math.PI / 6 : Math.PI * 5 / 6) + follow;
-      const rim = new THREE.Vector3(Math.cos(phi) * W.r, Math.sin(phi) * W.r, 0).applyQuaternion(tiltQ).add(new THREE.Vector3(W.x, W.y, W.z));
-      // ...into the driver's frame (it is only scaled and translated).
-      const T = rim.sub(D.position).divideScalar(H);
-      // Hands slide, and let go and re-grip, at a hand's pace rather than snapping.
-      const smooth = car['hand_' + side] || (car['hand_' + side] = T.clone());
-      smooth.lerp(T, Math.min(1, 12 * dt));
+      const T = targetFor(side).applyMatrix4(inv); // into the figure's frame
+      const smooth = car['hand_' + side + D.name] || (car['hand_' + side + D.name] = T.clone());
+      if (rate > 0) smooth.lerp(T, Math.min(1, rate * dt)); else smooth.copy(T);
       const S = new THREE.Vector3().fromArray(J.shoulder), E0 = new THREE.Vector3().fromArray(J.elbow), H0 = new THREE.Vector3().fromArray(J.hand);
       const L1 = E0.distanceTo(S), L2 = H0.distanceTo(E0);
       const toT = smooth.clone().sub(S);
       const d = clamp(toT.length(), Math.abs(L1 - L2) + 1e-3, L1 + L2 - 1e-3);
       const axis = toT.normalize();
-      // Elbow out and down from the line to the hand.
-      const pole = new THREE.Vector3(side === 'l' ? 0.25 : -0.25, -0.6, 0.1);
-      const poleDir = pole.sub(axis.clone().multiplyScalar(pole.dot(axis))).normalize();
+      const poleV = new THREE.Vector3(side === 'l' ? pole.x : -pole.x, pole.y, pole.z);
+      const poleDir = poleV.sub(axis.clone().multiplyScalar(poleV.dot(axis))).normalize();
       const cosA = clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1);
       const sinA = Math.sqrt(1 - cosA * cosA);
       const E = S.clone().addScaledVector(axis, L1 * cosA).addScaledVector(poleDir, L1 * sinA);

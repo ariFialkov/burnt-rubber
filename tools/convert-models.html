@@ -148,6 +148,11 @@
       });
     }
 
+    // Stock: the model's windscreen centre divider — a thin upright shell in
+    // the middle of the glazing — is dropped; it sat right in the driver's
+    // eye line.
+    if (model.drop) shells.forEach((s) => { if (!roles.has(s) && model.drop(s)) roles.set(s, 'drop'); });
+
     shells.forEach((s, i) => {
       if (roles.has(s)) return;
       const d = [s.size.x, s.size.y, s.size.z];
@@ -235,6 +240,7 @@
     geo.computeVertexNormals(); // scale/rotate are uniform, but be safe
 
     const shells = splitShells(geo);
+    if (vehicle === 'stock') size.drop = (s) => s.size.x < 0.1 && Math.abs(s.center.x) < 0.06 && s.center.y > 0.9 && s.center.y < 1.5 && s.center.z > 0.25 && s.center.z < 1.1;
     const { roles, wheels, standPivot } = classify(shells, size, cfg.wheels || 4);
 
     const root = new THREE.Group();
@@ -242,7 +248,7 @@
     const byRole = {};
     for (const s of shells) {
       const r = roles.get(s);
-      if (r === 'wheel') continue;
+      if (r === 'wheel' || r === 'drop') continue;
       (byRole[r] = byRole[r] || []).push(s);
     }
     const partTris = {};
@@ -447,7 +453,7 @@
     riderRoot.name = figure;
     let posed, riderMesh;
     const arms = {};
-    if (figure === 'driver') {
+    if (true) {
       // Split the arms off as their own meshes — upper arm pivoted at the
       // shoulder, forearm (with the hand) a child of it pivoted at the elbow
       // — so the runtime can aim the hands at the wheel. Triangles are
@@ -496,7 +502,7 @@
       // where the head and hands ended up relative to the hips
       hipHeight: J.hip,
       head: head.toArray().map((x) => +x.toFixed(3)), hands: hands.toArray().map((x) => +x.toFixed(3)),
-      ...(figure === 'driver' ? { arms } : {}) };
+      arms };
     meta[figure] = { ...riderRoot.userData };
 
     // Preview: the rider on the bike, in the game's own placement, with a
