@@ -52,6 +52,7 @@ function b64ToBuffer(b64) {
 
 function ingest(vehicle, gltf) {
   const parts = {};
+  const pivots = {}; // parts built around a hinge (the bike's stand) sit at it
   const wheels = [];
   let meta = null;
   gltf.scene.traverse((o) => {
@@ -61,11 +62,12 @@ function ingest(vehicle, gltf) {
       wheels.push({ geometry: o.geometry, position: o.position.clone(), radius: meta?.wheelRadius || 0.4 });
     } else {
       parts[o.name] = o.geometry;
+      if (o.position.lengthSq() > 0) pivots[o.name] = o.position.clone();
     }
   });
   if (!meta) throw new Error(`model ${vehicle}: metadata missing`);
   for (const w of wheels) w.radius = meta.wheelRadius || w.radius;
-  templates.set(vehicle, { meta, parts, wheels });
+  templates.set(vehicle, { meta, parts, pivots, wheels });
 }
 
 // Load every vehicle. `inline` (vehicle -> base64 GLB) is used by the
@@ -319,6 +321,7 @@ export function buildModelCar(vehicle, colors) {
   for (const [role, geometry] of Object.entries(t.parts)) {
     const m = new THREE.Mesh(geometry, mats[role] || SHARED.dark);
     m.name = role;
+    if (t.pivots[role]) m.position.copy(t.pivots[role]);
     group.add(m);
   }
   const wheels = t.wheels.map((w) => {

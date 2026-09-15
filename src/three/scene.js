@@ -14,6 +14,27 @@ const FWD = new THREE.Vector3(0, 0, 1);
 // a fraction of forward speed (a slip angle — a car at rest cannot move
 // across at all) and how quickly that sideways speed can build or bleed off
 // (m/s²). Rally and Baja cars throw themselves around; a stock car does not.
+// How each body sits on its suspension. `roll` and `pitch` are radians per
+// m/s² of lateral and longitudinal load (a car rolls outward and squats
+// under power); `spring` and `damp` are the suspension's natural frequency
+// (rad/s) and damping ratio — under 1 it bounces; `drift` is how far the
+// nose turns into a corner beyond the path (loose surfaces only); `bump`
+// is how much the wheels jitter over gravel (m), at low speed.
+const BODY = {
+  formula: { roll: 0.0015, rollMax: 0.03, pitch: 0.0010, spring: 16, damp: 1.0,  drift: 0,   bump: 0 },
+  stock:   { roll: 0.0040, rollMax: 0.07, pitch: 0.0020, spring: 9,  damp: 0.6,  drift: 0,   bump: 0 },
+  rally:   { roll: 0.0080, rollMax: 0.14, pitch: 0.0060, spring: 6,  damp: 0.4,  drift: 1.1, bump: 0.035 },
+  baja:    { roll: 0.0070, rollMax: 0.15, pitch: 0.0100, spring: 4.5, damp: 0.35, drift: 0.7, bump: 0.08 },
+  moto:    { roll: 0, rollMax: 0, pitch: 0, spring: 10, damp: 1.0, drift: 0, bump: 0, leanMax: 1.0 },
+};
+// Fastest a wheel is drawn turning (rad/s). Real speeds put a rim well past
+// what a frame rate can show, where it reads as slow or backwards; capping
+// keeps it visibly spinning hard, and it stays proportional below the cap.
+const WHEEL_OMEGA_MAX = 27;
+// Smooth 1-D noise in about [-1, 1] from a few incommensurate sines.
+const noise1 = (x) => 0.55 * Math.sin(x) + 0.3 * Math.sin(2.31 * x + 1.3) + 0.15 * Math.sin(5.7 * x + 0.4);
+const UP = new THREE.Vector3(0, 1, 0);
+
 const HANDLING = {
   formula: { slip: 0.16, aLat: 7 },
   stock:   { slip: 0.12, aLat: 5 },
@@ -51,6 +72,7 @@ export class RaceScene {
       : (COLLIDERS[race.tour.vehicle] || COLLIDERS.formula);
     const colw = this.col.width;
     this.handling = HANDLING[race.tour.vehicle] || HANDLING.formula;
+    this.body = BODY[race.tour.vehicle] || BODY.formula;
     // Rank in the finishing order: cars adjacent here are the ones that spend
     // the race in each other's company, so they are what the line spread below
     // needs to keep apart.
@@ -73,9 +95,19 @@ export class RaceScene {
       group.add(sprite);
       this.scene.add(group);
       const eye = eyeFor(race.tour.vehicle, height, length);
+      for (const w of wheels) w.userData.restY = w.position.y;
+      const riderObj = group.getObjectByName('rider');
+      if (riderObj) riderObj.userData.seat = { x: riderObj.position.x, y: riderObj.position.y };
       return {
         group, wheels, sprite, height, length, eye,
         glass: group.getObjectByName('glass') || null,
+        stand: group.getObjectByName('stand') || null,
+        rider: riderObj,
+        // Body state: suspension roll/pitch (with their velocities), drift
+        // angle, bike lean, filtered loads, gravel-bump phase, stand angle.
+        roll: 0, rollV: 0, pitch: 0, pitchV: 0, drift: 0, lean: 0,
+        latAcc: 0, lonAcc: 0, prevSpeed: 0, prevLaneVel: 0,
+        bumpPhase: rand() * 20, standAng: 0,
         pos: new THREE.Vector3(),
         tangent: new THREE.Vector3(0, 0, 1),
         dist: 0, speed: 0,
@@ -359,28 +391,16 @@ export class RaceScene {
       const nrm = new THREE.Vector3(-tangent.z, 0, tangent.x);
       const pos = p.clone().addScaledVector(nrm, car.lane);
       if (mode === 'grid') pos.y += Math.sin(wallTime * 30 + i) * 0.015; // idle vibration
-      else if (vehicle === 'baja') pos.y += Math.abs(Math.sin(shown * 0.13 + car.bounceP)) * 0.35;
 
       // Point the car where it is actually going: the track direction plus
-      // whatever it is steering across. (Lane +1 is the track's left.)
+      // whatever it is steering across. (Lane +1 is the track's right, and
+      // +X in the car's frame is its left.)
       const yaw = mode === 'race' ? Math.atan2(car.laneVel, Math.max(car.speedS, 3)) : 0;
       car.yaw += (yaw - car.yaw) * Math.min(1, 12 * dt);
 
       car.pos.copy(pos);
       car.tangent.copy(tangent);
-      car.group.position.copy(pos);
-      car.group.quaternion.setFromUnitVectors(FWD, tangent);
-      car.group.rotateY(-car.yaw);
-
-      // Corner lean / drift flavor
-      const u2 = (((car.dist + 8) / lapLen) % 1 + 1) % 1;
-      const tNext = this.track.curve.getTangentAt(u2);
-      const turn = Math.atan2(tangent.x * tNext.z - tangent.z * tNext.x, tangent.dot(tNext));
-      if (vehicle === 'moto') car.group.rotateZ(clamp(turn * 4.5, -0.6, 0.6));
-      else if (vehicle === 'rally' || vehicle === 'baja') car.group.rotateY(clamp(turn * 2.4, -0.5, 0.5));
-      else car.group.rotateZ(clamp(turn * 1.2, -0.18, 0.18));
-
-      for (const w of car.wheels) w.rotation.x -= (car.speed * dt) / (w.userData.radius || 0.45);
+      this.poseBody(car, tangent, mode, t, Math.min(dt, 0.05));
     }
 
     if (mode === 'race') {
@@ -394,6 +414,96 @@ export class RaceScene {
       this.leaderIdx = this.script.grid[0];
       this.backIdx = this.script.grid[this.script.grid.length - 1];
     }
+  }
+
+  // Orientation and suspension. The path decides where a car is; this
+  // decides how it sits there: nose along its motion (plus a drift angle on
+  // loose surfaces), body rolled outward and pitched by the loads on it
+  // through a spring, wheels spinning with the road and jittering over
+  // gravel, a bike leaned into the corner with its rider hanging off.
+  poseBody(car, tangent, mode, t, dt) {
+    const B = this.body;
+    const vehicle = this.race.tour.vehicle;
+    const lapLen = this.script.lapLen;
+    const racing = mode === 'race';
+
+    // Loads. Curvature of the road just ahead gives the cornering load;
+    // the steering across the road and the change of pace add to it.
+    const u2 = (((car.dist + 8) / lapLen) % 1 + 1) % 1;
+    const tNext = this.track.curve.getTangentAt(u2);
+    // Positive when the road bends to the right (+X being the car's left).
+    const turn = Math.atan2(tangent.x * tNext.z - tangent.z * tNext.x, tangent.dot(tNext));
+    const v = car.speedS;
+    const laneAcc = (car.laneVel - car.prevLaneVel) / dt;
+    const lonAcc = (car.speed - car.prevSpeed) / dt;
+    car.prevLaneVel = car.laneVel;
+    car.prevSpeed = car.speed;
+    // Lateral load toward the car's left (m/s²): a left bend, or steering left.
+    const aLeft = racing ? (v * v * (-turn / 8) - laneAcc) : 0;
+    car.latAcc += (aLeft - car.latAcc) * Math.min(1, 8 * dt);
+    car.lonAcc += ((racing ? lonAcc : 0) - car.lonAcc) * Math.min(1, 6 * dt);
+
+    // Drift: the nose turns into the corner beyond the path, building and
+    // fading over a beat, only once the car is really moving.
+    const driftTarget = B.drift ? clamp(-turn * B.drift, -0.35, 0.35) * Math.min(1, v / 12) : 0;
+    car.drift += (driftTarget - car.drift) * Math.min(1, 4 * dt);
+
+    // Orientation from an explicit basis (forward, world up), never from a
+    // minimal rotation — that flips a car over where the road dips.
+    const fwd = tangent.clone().applyAxisAngle(UP, -car.yaw + car.drift).normalize();
+    const left = UP.clone().cross(fwd).normalize();
+    const up = fwd.clone().cross(left).normalize();
+    car.group.position.copy(car.pos);
+    car.group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(left, up, fwd));
+
+    if (vehicle === 'moto') {
+      // Lean into the load, up to a MotoGP knee-down angle, at a rate a
+      // rider can throw the bike across.
+      const leanTarget = B.leanMax * Math.tanh(car.latAcc / 40);
+      car.lean += clamp(leanTarget - car.lean, -2.5 * dt, 2.5 * dt);
+      car.group.rotateZ(-car.lean); // +X is left, so a left lean is a negative roll
+      // The rider hangs off the inside: slides across the seat, drops, and
+      // leans further than the bike from the hips.
+      if (car.rider) {
+        const f = Math.abs(car.lean) / B.leanMax;
+        const side = Math.sign(car.lean) || 1;
+        const seat = car.rider.userData.seat;
+        car.rider.position.x = seat.x + side * 0.22 * f;
+        car.rider.position.y = seat.y - 0.06 * f;
+        car.rider.rotation.z = -side * 0.35 * f;
+      }
+      // The paddock stand swings up off the rear wheel as the race goes green.
+      if (car.stand) {
+        const target = racing && t > 0.3 ? 1.75 : 0;
+        car.standAng += clamp(target - car.standAng, -2.2 * dt, 2.2 * dt);
+        car.stand.rotation.x = car.standAng;
+      }
+    } else {
+      // Body on springs: roll outward under cornering, pitch under power and
+      // braking, each following its target through a damped spring.
+      const spring = (x, vel, target) => {
+        const a = B.spring * B.spring * (target - x) - 2 * B.damp * B.spring * vel;
+        vel += a * dt;
+        return [x + vel * dt, vel];
+      };
+      [car.roll, car.rollV] = spring(car.roll, car.rollV, clamp(B.roll * car.latAcc, -B.rollMax, B.rollMax));
+      [car.pitch, car.pitchV] = spring(car.pitch, car.pitchV, clamp(B.pitch * car.lonAcc, -0.06, 0.06));
+      car.group.rotateZ(car.roll);   // load to the left rolls the body right
+      car.group.rotateX(car.pitch);  // nose up under acceleration
+    }
+
+    // Wheels: spin with the road (capped where a frame rate can't show it),
+    // and on gravel each one works its own bumps — slow and big at a crawl,
+    // fast and small at speed — while the body rides level above them.
+    if (B.bump) {
+      const cruise = this.script.pace.cruise;
+      car.bumpPhase += (2 + car.speed * 0.4) * dt;
+      const amp = B.bump * (0.4 + 0.6 * (1 - Math.min(1, car.speed / cruise))) * Math.min(1, car.speed / 2);
+      car.wheels.forEach((w, k) => {
+        w.position.y = w.userData.restY + amp * noise1(car.bumpPhase + k * 1.7 + car.bounceP);
+      });
+    }
+    for (const w of car.wheels) w.rotation.x -= Math.min(car.speed / (w.userData.radius || 0.45), WHEEL_OMEGA_MAX) * dt;
   }
 
   standingsNow(tRace) {

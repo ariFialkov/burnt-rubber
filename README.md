@@ -144,9 +144,10 @@ Chromium). The sources are single merged meshes, so the pipeline recovers
 parts from geometry: it welds the mesh, splits it into
 connected shells, and classifies each by shape and placement — wheels are
 round and low, wings are thin plates, glazing sits high, tiny bits are trim.
-Wheels become their own nodes pivoted at the axle so they spin; the rest is
-grouped into `primary` and `secondary` bodywork (the team livery), `glass`,
-and `dark`. Every car on track shares the geometry and only carries its two
+Wheels become their own nodes pivoted at the axle so they spin; on the bike
+the paddock stand (everything reaching the ground behind the rear axle) is
+its own node hinged at the axle; the rest is grouped into `primary` and
+`secondary` bodywork (the team livery), `glass`, and `dark`. Every car on track shares the geometry and only carries its two
 livery materials. Paint is physically based with a baked studio reflection,
 each car casts a soft contact shadow, and the bike gets a rider.
 
@@ -167,6 +168,21 @@ car's actual surface they cover — and remaps pixels near them to the team's
 primary and secondary colours, keeping the baked shading, decals, numbers,
 whites and blacks exactly as painted. A model without UVs would keep the
 flat role paint instead.
+
+**Body dynamics.** Each class sits on its own suspension (`BODY` in
+`src/three/scene.js`): the body rolls outward under cornering load and
+pitches under power and braking through a damped spring — stiff and
+critically damped on the formula car, looser on the stock car, bouncy on
+the rally car and trophy truck. On loose surfaces the nose turns into the
+corner beyond the path (a drift); on tarmac it leads with the nose. Over
+gravel each wheel works its own bumps from a smooth noise — slow and big at
+a crawl, fast and small at speed — while the body rides level above them.
+Wheels spin with the road, capped at what a frame rate can show. Bikes lean
+into the load up to a knee-down angle, the rider hangs off the inside from
+the hips, and the paddock stand (its own hinged node in the model) swings up
+off the rear wheel as the race goes green. Orientation always comes from an
+explicit forward/up basis, never a minimal rotation, which is what used to
+flip cars over where a road dipped.
 
 Cars don't pass through each other: each carries a collision footprint and a
 separation pass keeps the field apart. It works in track space (offset along

@@ -135,6 +135,19 @@
     const wheels = wheelish.slice(0, wheelCount);
     wheels.forEach((s) => roles.set(s, 'wheel'));
 
+    // Bikes: the paddock stand is everything that reaches the ground behind
+    // the rear axle (the base and its uprights). It becomes its own node,
+    // hinged at the axle, so it can swing up on the start.
+    let standPivot = null;
+    if (wheelCount === 2 && wheels.length === 2) {
+      const rear = wheels.reduce((a, b) => (a.center.z < b.center.z ? a : b));
+      standPivot = rear.box.getCenter(new THREE.Vector3());
+      shells.forEach((s) => {
+        if (roles.has(s)) return;
+        if (s.box.min.y < 0.12 * H && s.center.z < standPivot.z) roles.set(s, 'stand');
+      });
+    }
+
     shells.forEach((s, i) => {
       if (roles.has(s)) return;
       const d = [s.size.x, s.size.y, s.size.z];
@@ -147,7 +160,7 @@
       else if (s.center.y > H * 0.62) roles.set(s, 'glass');                    // cabin glazing
       else roles.set(s, 'primary');
     });
-    return { roles, wheels };
+    return { roles, wheels, standPivot };
   }
 
   const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
@@ -222,7 +235,7 @@
     geo.computeVertexNormals(); // scale/rotate are uniform, but be safe
 
     const shells = splitShells(geo);
-    const { roles, wheels } = classify(shells, size, cfg.wheels || 4);
+    const { roles, wheels, standPivot } = classify(shells, size, cfg.wheels || 4);
 
     const root = new THREE.Group();
     root.name = vehicle;
@@ -234,8 +247,11 @@
     }
     const partTris = {};
     for (const [r, list] of Object.entries(byRole)) {
-      const m = new THREE.Mesh(gather(geo, list), PALETTE[r]);
+      // The stand is built around its hinge so it can rotate in place.
+      const pivot = r === 'stand' ? standPivot : null;
+      const m = new THREE.Mesh(gather(geo, list, pivot || undefined), PALETTE[r] || PALETTE.dark);
       m.name = r;
+      if (pivot) m.position.copy(pivot);
       root.add(m);
       partTris[r] = list.reduce((a, s) => a + s.tris.length, 0);
     }
@@ -255,6 +271,10 @@
     };
     meta[vehicle] = { ...root.userData, shells: shells.length, parts: partTris,
       wheelCentres: wheels.map((s) => s.box.getCenter(new THREE.Vector3()).toArray().map((v) => +v.toFixed(2))) };
+    // Every shell with its role, for inspecting the classification.
+    (window.__shellDump = window.__shellDump || {})[vehicle] = shells.map((s) => ({
+      role: roles.get(s), tris: s.tris.length,
+      min: s.box.min.toArray().map((v) => +v.toFixed(2)), max: s.box.max.toArray().map((v) => +v.toFixed(2)) }));
 
     // Preview renders: textured, with a team recolour where an atlas exists.
     if (window.__prev) scene.remove(window.__prev);
