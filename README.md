@@ -133,7 +133,16 @@ would fall under half the width plus a margin).
 
 Five cameras:
 
-- **3rd person** behind any car, **driver's view**, **hood-back**
+- **3rd person** behind any car
+- **Driver's view**: the driver's eyes, in the car's own frame, so it rolls
+  with the body and leans with the bike. The models are exteriors only, so
+  each class carries a procedural cockpit kit (`src/three/cockpit.js`) —
+  cabin shell, dashboard with dials, steering wheel that turns with the
+  road, pillars, and the class's own furniture (halo, roll cage) — attached
+  to whichever car the camera is riding; a bike hides its rider and looks
+  over the bars
+- **Hood-back**: a reverse angle — a boom out ahead of the nose, above hood
+  height, looking back over the car at whoever is chasing it
 - **Cinematic**: trackside cameras auto-placed at the highest-curvature
   corners, cutting sequentially as the pack arrives and panning with the
   leaders like broadcast action cams

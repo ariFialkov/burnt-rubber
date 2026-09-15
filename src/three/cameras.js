@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { clamp } from '../core/rng.js';
+import { cockpitFor } from './cockpit.js';
 
 export const CAMERA_MODES = [
   { id: 'chase', label: '3rd Person', icon: '🎥' },
@@ -14,7 +15,8 @@ export const CAMERA_MODES = [
 
 export class CameraRig {
   constructor(aspect) {
-    this.camera = new THREE.PerspectiveCamera(60, aspect, 0.5, 6000);
+    // Near plane close enough for a steering wheel half a metre from the eye.
+    this.camera = new THREE.PerspectiveCamera(60, aspect, 0.25, 6000);
     this.mode = 'chopper';
     this.carIdx = 0;
     this.lookTarget = new THREE.Vector3();
@@ -46,6 +48,7 @@ export class CameraRig {
     const followed = clamp(this.carIdx, 0, rs.cars.length - 1);
     const onboard = this.mode === 'chase' || this.mode === 'cockpit' || this.mode === 'hood';
     rs.setSeeThrough?.(this.mode === 'cockpit' ? followed : -1);
+    rs.setCockpit?.(this.mode === 'cockpit' ? followed : -1);
     // The followed car's own number board would sit right in the lens.
     for (let i = 0; i < rs.cars.length; i++) {
       const show = !(onboard && i === followed);
@@ -57,13 +60,19 @@ export class CameraRig {
       look = car.pos.clone().addScaledVector(car.tangent, 7).addScaledVector(up, h * 0.55);
       fov = 62; stiff = 8;
     } else if (this.mode === 'cockpit') {
-      pos = car.pos.clone().addScaledVector(car.tangent, eye.z).addScaledVector(up, eye.y);
-      look = car.pos.clone().addScaledVector(car.tangent, 40).addScaledVector(up, eye.y * 0.8);
-      fov = 74; stiff = 30;
+      // The driver's eyes, in the car's own frame — so the view rolls and
+      // pitches with the body and leans with the bike.
+      const C = cockpitFor(rs.race.tour.vehicle);
+      car.group.updateMatrixWorld();
+      pos = car.group.localToWorld(new THREE.Vector3(C.eye.x, C.eye.y, C.eye.z));
+      look = car.group.localToWorld(new THREE.Vector3(C.eye.x, C.eye.y - C.look.down * 30, C.eye.z + 30));
+      fov = 72; stiff = 30;
     } else if (this.mode === 'hood') {
-      pos = car.pos.clone().addScaledVector(car.tangent, len * 0.42).addScaledVector(up, h * 0.75);
-      look = car.pos.clone().addScaledVector(car.tangent, -40).addScaledVector(up, h * 0.7);
-      fov = 68; stiff = 30;
+      // Reverse angle: a boom out ahead of the nose, above hood height,
+      // looking back over the car at whoever is chasing it.
+      pos = car.pos.clone().addScaledVector(car.tangent, len * 0.5 + 2.4).addScaledVector(up, h * 1.15 + 0.5);
+      look = car.pos.clone().addScaledVector(car.tangent, -7).addScaledVector(up, h * 0.45);
+      fov = 66; stiff = 30;
     } else if (this.mode === 'cine') {
       this.updateCine(rs, leader);
       pos = this.cineCorner ? this.cineCorner.pos : new THREE.Vector3(0, 40, 120);
@@ -82,7 +91,10 @@ export class CameraRig {
 
     const k = this.snap ? 1 : 1 - Math.exp(-stiff * dt);
     const kl = this.snap ? 1 : 1 - Math.exp(-Math.max(stiff, 6) * dt);
-    cam.position.lerp(pos, this.mode === 'cine' ? 1 : k); // cine cam is bolted down
+    // The cine cam is bolted down, and the onboard mounts are rigid: any lag
+    // there would leave the camera trailing metres behind the car at speed.
+    const rigid = this.mode === 'cine' || this.mode === 'cockpit' || this.mode === 'hood';
+    cam.position.lerp(pos, rigid ? 1 : k);
     this.smoothLook.lerp(look, kl);
     cam.lookAt(this.smoothLook);
     cam.fov += (fov - cam.fov) * (this.snap ? 1 : 1 - Math.exp(-3 * dt));

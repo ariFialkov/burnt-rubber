@@ -6,6 +6,7 @@ import { rngFor, clamp, lerp, smoothstep } from '../core/rng.js';
 import { buildTrack } from './trackGen.js';
 import { buildCar, carLabel, positionBadge, COLLIDERS } from './carFactory.js';
 import { buildModelCar, modelMeta, shadowBlob, eyeFor } from './models.js';
+import { buildCockpitKit } from './cockpit.js';
 import { getScript, getFocusLayer, GRID_OFFSET } from '../engine/script.js';
 
 const FWD = new THREE.Vector3(0, 0, 1);
@@ -135,6 +136,8 @@ export class RaceScene {
     });
     this.order = race.field.map((_, i) => i); // reused each frame, sorted by track position
     this.rankTimer = 0;
+    this.kit = null;   // the driver's-eye interior, built on first use
+    this.kitOn = -1;   // which car carries it
     this.leaderIdx = 0;
     this.backIdx = 0;
     this.centroid = new THREE.Vector3();
@@ -148,6 +151,23 @@ export class RaceScene {
       const g = this.cars[i].glass;
       if (g) g.visible = i !== idx;
     }
+  }
+
+  // Put the cockpit interior in the car the driver camera is riding (and hide
+  // that bike's rider, who would otherwise fill the lens); -1 removes it.
+  setCockpit(idx) {
+    if (this.kitOn === idx) return;
+    if (this.kitOn >= 0) {
+      const prev = this.cars[this.kitOn];
+      if (this.kit) prev.group.remove(this.kit);
+      if (prev.rider) prev.rider.visible = true;
+    }
+    this.kitOn = idx;
+    if (idx < 0) return;
+    if (!this.kit) this.kit = buildCockpitKit(this.race.tour.vehicle);
+    const car = this.cars[idx];
+    car.group.add(this.kit);
+    if (car.rider) car.rider.visible = false;
   }
 
   setFocus(idx) {
@@ -449,6 +469,7 @@ export class RaceScene {
     const tNext = this.track.curve.getTangentAt(u2);
     // Positive when the road bends to the right (+X being the car's left).
     const turn = Math.atan2(tangent.x * tNext.z - tangent.z * tNext.x, tangent.dot(tNext));
+    car.turnAhead = turn;
     const v = car.speedS;
     const laneAcc = (car.laneVel - car.prevLaneVel) / dt;
     const lonAcc = (car.speed - car.prevSpeed) / dt;
@@ -520,6 +541,16 @@ export class RaceScene {
       });
     }
     for (const w of car.wheels) w.rotation.x -= Math.min(car.speed / (w.userData.radius || 0.45), WHEEL_OMEGA_MAX) * dt;
+
+    // The steering wheel in the cockpit kit turns with the road ahead and
+    // whatever the car is steering across.
+    if (this.kit && this.kit.parent === car.group) {
+      const wheel = this.kit.getObjectByName('wheel');
+      if (wheel) {
+        const target = clamp(turn * 3 + car.yaw * 4, -1.2, 1.2);
+        wheel.rotation.z += (target - wheel.rotation.z) * Math.min(1, 10 * dt);
+      }
+    }
   }
 
   standingsNow(tRace) {
