@@ -106,7 +106,7 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 /* ---------- chyron ---------- */
 .chyron {
-  position: absolute; left: 14px; bottom: calc(158px + var(--sab));
+  position: absolute; left: 14px; bottom: calc(132px + var(--sab));
   display: flex; align-items: stretch; max-width: min(560px, calc(100% - 28px));
   border-radius: 10px; overflow: hidden;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
@@ -124,44 +124,58 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .chyron-title { font-weight: 800; font-size: 1rem; letter-spacing: 0.02em; }
 .chyron-sub { color: var(--dim); font-size: 0.78rem; margin-top: 2px; }
 
-/* ---------- tour sheet ---------- */
-.tour-sheet {
+/* ---------- tour tabs ---------- */
+.tour-tabs {
   position: absolute; left: 0; right: 0; bottom: 0;
-  transform: translateY(calc(100% - 148px - var(--sab)));
-  transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1);
+  display: flex; gap: 6px; align-items: flex-end;
+  padding: 0 8px calc(8px + var(--sab));
 }
-.tour-sheet.open { transform: none; }
-.sheet-handle {
-  display: block; margin: 0 auto 8px; color: var(--txt);
-  background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
-  padding: 6px 22px 8px; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.14em;
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-}
-.sheet-handle span { display: block; width: 34px; height: 4px; border-radius: 2px; background: var(--dim); margin: 0 auto 5px; }
-.tour-cards {
-  display: flex; gap: 10px; overflow-x: auto; padding: 4px 14px calc(14px + var(--sab));
-  scroll-snap-type: x mandatory; scrollbar-width: none;
-}
-.tour-cards::-webkit-scrollbar { display: none; }
-.tour-card {
-  flex: 0 0 240px; scroll-snap-align: start;
+.tour-tab {
+  flex: 1 1 0; min-width: 0;
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 12px 14px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   border-top: 3px solid var(--tc, var(--accent));
-  display: flex; flex-direction: column; gap: 6px;
-  transition: transform .12s;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  transition: transform .3s cubic-bezier(0.2, 0.9, 0.3, 1), box-shadow .3s;
+  cursor: pointer; overflow: hidden;
 }
-.tour-card:active { transform: scale(.97); }
-.tc-name { font-weight: 900; font-style: italic; letter-spacing: 0.04em; }
-.tc-race { font-size: 0.85rem; color: var(--txt); font-weight: 600; }
-.tc-status { font-size: 0.74rem; color: var(--dim); }
-.tc-status b { color: var(--tc, var(--gold)); }
-.tc-odds { display: flex; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
-.tc-odd { font-size: 0.7rem; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; color: var(--dim); }
-.tc-odd b { color: var(--txt); }
-.tc-btn {
-  margin-top: 6px; text-align: center; font-weight: 800; font-size: 0.82rem;
-  background: var(--tc, var(--accent)); color: #0b0d12; border-radius: 9px; padding: 9px;
+.tour-tab:hover, .tour-tab:focus-within {
+  transform: translateY(-6px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.tour-tab:active { transform: translateY(-4px) scale(.99); }
+.tt-board {
+  max-height: 0; overflow: hidden; opacity: 0;
+  transition: max-height .35s cubic-bezier(0.2, 0.9, 0.3, 1), opacity .25s;
+  padding: 0 10px;
+}
+.tour-tab:hover .tt-board, .tour-tab:focus-within .tt-board { max-height: 190px; opacity: 1; padding-top: 10px; }
+.tt-board-title { font-size: 0.62rem; font-weight: 900; letter-spacing: 0.14em; color: var(--tc, var(--gold)); margin-bottom: 4px; }
+.tt-row {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.7rem; font-weight: 700; padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+.tt-row .p { width: 14px; color: var(--dim); font-weight: 800; }
+.tt-row .n { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-row b { color: var(--txt); font-variant-numeric: tabular-nums; }
+.tt-main { padding: 9px 10px 10px; display: flex; flex-direction: column; gap: 4px; }
+.tt-name { font-weight: 900; font-style: italic; letter-spacing: 0.04em; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-race { font-size: 0.72rem; color: var(--txt); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-status { font-size: 0.68rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-status b { color: var(--tc, var(--gold)); }
+.tour-tab.live .tt-status b { animation: pulse 1.6s infinite; }
+.tt-btn {
+  margin-top: 3px; text-align: center; font-weight: 800; font-size: 0.72rem;
+  background: var(--tc, var(--accent)); color: #0b0d12; border-radius: 8px; padding: 8px 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tt-short { display: none; }
+@media (max-width: 560px) {
+  .tour-tab .tt-full { display: none; }
+  .tour-tab .tt-short { display: inline; }
+  .tt-race { display: none; }
+  .tt-status { font-size: 0.64rem; }
+  .tt-btn { font-size: 0.66rem; padding: 7px 2px; }
 }
 
 /* ---------- panels (board / garage / bets) ---------- */
@@ -363,7 +377,37 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 @media (min-width: 760px) {
   .tower { width: 178px; }
   .tw-row { font-size: 0.76rem; }
-  .tour-card { flex-basis: 260px; }
-  .chyron { bottom: calc(178px + var(--sab)); }
-  .tour-sheet { transform: translateY(calc(100% - 168px - var(--sab))); }
+  .tour-tabs { gap: 10px; padding: 0 14px calc(12px + var(--sab)); }
+  .tt-main { padding: 12px 14px 12px; gap: 5px; }
+  .tt-name { font-size: 0.95rem; }
+  .tt-race { font-size: 0.8rem; }
+  .tt-status { font-size: 0.74rem; }
+  .tt-btn { font-size: 0.8rem; padding: 9px; }
+  .chyron { bottom: calc(150px + var(--sab)); }
 }
+
+/* ---------- finish card (onboard cams) ---------- */
+.finish-card {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 6, 9, 0.6); pointer-events: none; z-index: 3;
+  animation: fade-in 0.5s;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.fc-card {
+  width: min(380px, calc(100% - 40px)); text-align: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px 18px;
+  animation: fc-in 0.45s cubic-bezier(0.2, 1.2, 0.3, 1);
+}
+@keyframes fc-in { from { transform: translateY(20px) scale(0.94); opacity: 0; } }
+.fc-flag { font-size: 0.7rem; font-weight: 900; letter-spacing: 0.3em; color: var(--dim); }
+.fc-title { font-size: 2rem; font-weight: 900; font-style: italic; letter-spacing: 0.06em; margin: 2px 0 10px; }
+.fc-racer { display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; font-size: 1rem; }
+.fc-racer img { width: 44px; height: 44px; border-radius: 10px; }
+.fc-pos { font-size: 2.6rem; font-weight: 900; color: var(--gold); margin: 8px 0 0; line-height: 1; }
+.fc-pos small { font-size: 0.8rem; color: var(--dim); letter-spacing: 0.14em; display: block; margin-top: 4px; }
+.fc-time { display: flex; justify-content: center; gap: 22px; margin-top: 12px; }
+.fc-time div { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 1.05rem; }
+.fc-time small { display: block; color: var(--dim); font-size: 0.62rem; letter-spacing: 0.14em; font-weight: 800; }
+.fc-hint { margin-top: 12px; color: var(--dim); font-size: 0.68rem; }
+.live-top, .cam-bar, .popup-bet { z-index: 4; }
+.results { z-index: 5; }

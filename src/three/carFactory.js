@@ -103,24 +103,62 @@ export function buildCar(vehicle, colors) {
   return { group: g, wheels };
 }
 
-export function numberSprite(number, accent) {
+// Labels over each car: a pill with the number, flag and name, and a separate
+// position badge that redraws when the rank changes. Both are sprites, so
+// they face the camera; the badge is anchored through `center` so it always
+// sits to the pill's left on screen, whatever the camera does.
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+
+export function carLabel(racer, accent) {
   const c = document.createElement('canvas');
-  c.width = 64; c.height = 64;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = 'rgba(10,12,16,0.85)';
-  ctx.beginPath();
-  ctx.arc(32, 32, 30, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 4;
-  ctx.stroke();
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 30px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(String(number), 32, 34);
+  c.width = 512; c.height = 128;
+  const g = c.getContext('2d');
+  roundRect(g, 6, 18, 500, 92, 46);
+  g.fillStyle = 'rgba(10,12,16,0.86)';
+  g.fill();
+  g.strokeStyle = accent;
+  g.lineWidth = 6;
+  g.stroke();
+  g.fillStyle = accent;
+  g.beginPath(); g.arc(64, 64, 38, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#0b0d12';
+  g.font = 'bold 42px sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(String(racer.number), 64, 66);
+  g.fillStyle = '#fff';
+  g.font = 'bold 44px sans-serif';
+  g.textAlign = 'left';
+  g.fillText(`${racer.flag} ${racer.short}`, 116, 66, 380);
   const tex = new THREE.CanvasTexture(c);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, opacity: 0.9 }));
-  sprite.scale.set(1.3, 1.3, 1);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, opacity: 0.92 }));
+  sprite.scale.set(4.0, 1.0, 1);
   return sprite;
+}
+
+export function positionBadge(accent) {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const g = c.getContext('2d');
+  const tex = new THREE.CanvasTexture(c);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, opacity: 0.95 }));
+  sprite.scale.set(1.0, 1.0, 1);
+  // The pill is 4.0 wide about its anchor; put this badge's right edge just
+  // past the pill's left edge, in units of the badge's own width.
+  sprite.center.set(1 + (2.0 + 0.1) / 1.0, 0.5);
+  const set = (rank) => {
+    g.clearRect(0, 0, 128, 128);
+    g.fillStyle = accent;
+    g.beginPath(); g.arc(64, 64, 58, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#0b0d12';
+    g.font = `bold ${rank >= 10 ? 52 : 60}px sans-serif`;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(`P${rank}`, 64, 68);
+    tex.needsUpdate = true;
+  };
+  set(0);
+  return { sprite, set };
 }

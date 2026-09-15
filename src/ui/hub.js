@@ -1,25 +1,61 @@
-// Hub screen: chyron over the rotating "news chopper" backdrop + the pull-up
-// tour panel with live status and quick odds for all five tours.
+// Hub screen: chyron over the rotating "news chopper" backdrop + the five
+// tour tabs along the bottom, each sliding up on hover to show its leaderboard.
 
 import { markets, fmtOdds } from '../engine/odds.js';
+import { getScript } from '../engine/script.js';
+import { clamp } from '../core/rng.js';
 
 const $ = (id) => document.getElementById(id);
 
 export function initHub(ctx) {
-  $('sheet-handle').addEventListener('click', () => $('tour-sheet').classList.toggle('open'));
   $('btn-garage').addEventListener('click', () => ctx.showView('garage'));
   $('btn-mybets').addEventListener('click', () => ctx.showView('mybets'));
   $('wallet-chip').addEventListener('click', () => ctx.showView('mybets'));
 
-  $('tour-cards').addEventListener('click', (e) => {
-    const card = e.target.closest('[data-tour]');
-    if (!card) return;
-    const tourId = card.dataset.tour;
-    ctx.openTour(tourId);
+  $('tour-tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-tour]');
+    if (!tab) return;
+    ctx.openTour(tab.dataset.tour);
   });
 }
 
-let lastCardsHtml = '';
+// One tab per tour, built once and patched in place — rebuilding the DOM
+// every tick would reset the hover slide-up mid-animation.
+const tabs = new Map(); // tourId -> { el, fields: {name: el, ...}, last: {name: text, ...} }
+
+function tabFor(s) {
+  let t = tabs.get(s.tour.id);
+  if (t) return t;
+  const el = document.createElement('div');
+  el.className = 'tour-tab';
+  el.dataset.tour = s.tour.id;
+  el.style.setProperty('--tc', s.tour.accent);
+  el.innerHTML = `
+    <div class="tt-board">
+      <div class="tt-board-title"></div>
+      <div class="tt-rows"></div>
+    </div>
+    <div class="tt-main">
+      <div class="tt-name" style="color:${s.tour.accent}"><span class="tt-full">${s.tour.name}</span><span class="tt-short">${s.tour.tag}</span></div>
+      <div class="tt-race"></div>
+      <div class="tt-status"></div>
+      <div class="tt-btn"></div>
+    </div>`;
+  $('tour-tabs').appendChild(el);
+  t = {
+    el,
+    fields: Object.fromEntries(['tt-board-title', 'tt-rows', 'tt-race', 'tt-status', 'tt-btn'].map((c) => [c, el.querySelector('.' + c)])),
+    last: {},
+  };
+  tabs.set(s.tour.id, t);
+  return t;
+}
+
+function patch(t, field, html) {
+  if (t.last[field] === html) return;
+  t.last[field] = html;
+  t.fields[field].innerHTML = html;
+}
 
 export function updateHub(ctx, states) {
   // Chyron for the tour currently on the backdrop.
@@ -36,27 +72,39 @@ export function updateHub(ctx, states) {
     : st.phase === 'racing' ? `LAP ${ctx.lapOf(st)} — ${st.race.field.length} racers · Purse ${st.race.purse}K`
     : `Checkered flag! Next race soon · Purse ${st.race.purse}K`;
 
-  // Tour cards (rebuild only when content changes meaningfully).
-  const html = states.map((s) => {
+  // Tour tabs: status and button always showing; on hover the tab slides up
+  // to reveal the top of the leaderboard — projected from the win odds before
+  // the start, live standings once it is running — with each racer's odds.
+  for (const s of states) {
+    const t = tabFor(s);
     const m = markets(s.race);
-    const top3 = m.outrights.slice(0, 3)
-      .map((o) => `<span class="tc-odd">${o.racer.code} <b>${fmtOdds(o.win)}</b></span>`).join('');
-    const status =
-      s.phase === 'betting' ? `Betting open · closes <b>${Math.ceil(s.countdown)}s</b>`
-      : s.phase === 'racing' ? `<b>● LIVE</b> — lap ${ctx.lapOf(s)}`
-      : `Finished · next in <b>${Math.ceil(s.countdown)}s</b>`;
-    const btn = s.phase === 'betting' ? 'BET BOARD' : s.phase === 'racing' ? 'WATCH LIVE' : 'RESULTS';
-    return `
-      <div class="tour-card" data-tour="${s.tour.id}" style="--tc:${s.tour.accent}">
-        <div class="tc-name" style="color:${s.tour.accent}">${s.tour.name}</div>
-        <div class="tc-race">${s.race.track.name} · ${s.race.track.loc}</div>
-        <div class="tc-status">${status} · ${s.race.field.length} racers · Purse ${s.race.purse}K</div>
-        <div class="tc-odds">${top3}</div>
-        <div class="tc-btn">${btn}</div>
-      </div>`;
-  }).join('');
-  if (html !== lastCardsHtml) {
-    lastCardsHtml = html;
-    $('tour-cards').innerHTML = html;
+    const winOdds = new Map(m.outrights.map((o) => [o.i, o.win]));
+    let order, boardTitle;
+    if (s.phase === 'betting') {
+      order = m.outrights.map((o) => o.i);
+      boardTitle = 'PROJECTED';
+    } else if (s.phase === 'racing') {
+      const script = getScript(s.race);
+      order = script.standings(clamp(s.tRace / script.T, 0, 1), null);
+      boardTitle = `LIVE · LAP ${ctx.lapOf(s)}`;
+    } else {
+      order = getScript(s.race).finishOrder;
+      boardTitle = 'RESULT';
+    }
+    const rows = order.slice(0, 5).map((i, k) => {
+      const r = s.race.field[i];
+      return `<div class="tt-row"><span class="p">${k + 1}</span><span class="n">${r.flag} ${r.short}</span><b>${fmtOdds(winOdds.get(i))}</b></div>`;
+    }).join('');
+    patch(t, 'tt-board-title', boardTitle);
+    patch(t, 'tt-rows', rows);
+    patch(t, 'tt-race', `${s.race.track.name} · ${s.race.track.loc}`);
+    // Long and short forms; the stylesheet picks one for the screen width.
+    const two = (full, short) => `<span class="tt-full">${full}</span><span class="tt-short">${short}</span>`;
+    patch(t, 'tt-status',
+      s.phase === 'betting' ? two(`Betting · closes <b>${Math.ceil(s.countdown)}s</b>`, `closes <b>${Math.ceil(s.countdown)}s</b>`)
+      : s.phase === 'racing' ? two(`<b>● LIVE</b> · lap ${ctx.lapOf(s)}`, `<b>● LIVE</b> L${ctx.lapOf(s)}`)
+      : two(`Finished · next <b>${Math.ceil(s.countdown)}s</b>`, `next <b>${Math.ceil(s.countdown)}s</b>`));
+    patch(t, 'tt-btn', s.phase === 'betting' ? two('BET BOARD', 'BET') : s.phase === 'racing' ? two('WATCH LIVE', 'LIVE') : two('RESULTS', 'RESULT'));
+    t.el.classList.toggle('live', s.phase === 'racing');
   }
 }

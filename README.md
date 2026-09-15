@@ -80,6 +80,11 @@ live races at the same moment, with no server.
   it land.
 - **Sponsorship (Garage)**: pay a one-time fee to own a racer; winning WIN
   bets on them pay +25% winnings. Sell back anytime for 25% of the fee.
+- **Hub**: the five tours sit along the bottom of the hub, each with its
+  status and its BET BOARD / WATCH LIVE / RESULTS button always showing;
+  hovering a tab slides it up to reveal the top of its leaderboard with win
+  odds — projected from the market before the start, live standings during
+  the race, the result after.
 - **Bet tracker**: a hub-screen rail with every open ticket's live progress
   (current position, grid countdown, in-play props) and recent results —
   tap a ticket to jump to its race.
@@ -134,6 +139,13 @@ Five cameras:
   leaders like broadcast action cams
 - **Chopper**: aerial follow that climbs as the field spreads out so the
   whole race stays in frame
+
+Every car carries a label — number, flag and name — with a separate position
+badge beside it that follows the leaderboard; the car being ridden onboard
+hides its own. When that car crosses the line, a finish card names the racer,
+their race time, gap to the winner and finishing position, while the camera
+bar stays live underneath so you can keep switching cars and views until the
+full results come up.
 
 ### The cars
 

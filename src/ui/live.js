@@ -26,6 +26,8 @@ function freshState(race) {
     flAnnounced: false,
     holeshotAnnounced: false,
     towerBuiltFor: '',
+    finishKey: '',
+    crossT: new Map(), // racer idx -> the race time it crossed the line
   };
 }
 
@@ -187,10 +189,57 @@ export function updateLive(ctx) {
     if (ui.active) tickPopup(st);
   }
 
+  updateFinishCard(ctx, st, script);
+
   if (st.phase === 'post' && !ui.resultsShown) {
     ui.resultsShown = true;
     showResults(ctx, race, script);
   }
+}
+
+// When the car being ridden onboard crosses the line, say so — a dark card
+// with the racer, their time and finishing position — while the camera bar
+// stays usable underneath so the viewer can keep switching cars and cams.
+function crossingTime(script, i, adj) {
+  let lo = 0, hi = script.T + (script.maxGap ?? 10) + 5;
+  for (let k = 0; k < 40; k++) {
+    const mid = (lo + hi) / 2;
+    if (script.distance(i, mid, adj) < script.totalDist) lo = mid; else hi = mid;
+  }
+  return hi;
+}
+const fmtTime = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(3).padStart(6, '0')}`;
+
+function updateFinishCard(ctx, st, script) {
+  const race = st.race;
+  const scene = ctx.currentScene;
+  const onboard = ['chase', 'cockpit', 'hood'].includes(ctx.rig.mode);
+  const sel = clamp(ctx.selectedCarIdx, 0, race.field.length - 1);
+  const car = scene?.cars[sel];
+  const show = onboard && st.phase === 'racing' && !!car && car.dist >= script.totalDist && !ui.resultsShown;
+  const key = show ? String(sel) : '';
+  if (key === ui.finishKey) return;
+  ui.finishKey = key;
+  const el = $('finish-card');
+  if (!show) { el.classList.add('hidden'); return; }
+  const r = race.field[sel];
+  const pos = script.finishOrder.indexOf(sel) + 1;
+  if (!ui.crossT.has(sel)) ui.crossT.set(sel, crossingTime(script, sel, scene.adj));
+  const tCross = ui.crossT.get(sel);
+  const suffix = pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th';
+  el.innerHTML = `
+    <div class="fc-card">
+      <div class="fc-flag">🏁 CHECKERED FLAG</div>
+      <div class="fc-title">FINISHED</div>
+      <div class="fc-racer"><img src="${portraitDataURI(r)}" alt=""/><span>${r.flag} #${r.number} ${r.name}</span></div>
+      <div class="fc-pos">P${pos}<small>${pos}${suffix} of ${race.field.length}${pos === 1 ? ' · WINNER' : ''}</small></div>
+      <div class="fc-time">
+        <div>${fmtTime(tCross)}<small>RACE TIME</small></div>
+        <div>${pos === 1 ? '—' : `+${script.finalGap[sel].toFixed(3)}s`}<small>TO WINNER</small></div>
+      </div>
+      <div class="fc-hint">Cameras stay live — switch cars or views below</div>
+    </div>`;
+  el.classList.remove('hidden');
 }
 
 let towerTick = 0;

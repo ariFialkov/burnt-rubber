@@ -47,7 +47,11 @@ export class CameraRig {
     const onboard = this.mode === 'chase' || this.mode === 'cockpit' || this.mode === 'hood';
     rs.setSeeThrough?.(this.mode === 'cockpit' ? followed : -1);
     // The followed car's own number board would sit right in the lens.
-    for (let i = 0; i < rs.cars.length; i++) rs.cars[i].sprite.visible = !(onboard && i === followed);
+    for (let i = 0; i < rs.cars.length; i++) {
+      const show = !(onboard && i === followed);
+      rs.cars[i].sprite.visible = show;
+      if (rs.cars[i].posSprite) rs.cars[i].posSprite.visible = show;
+    }
     if (this.mode === 'chase') {
       pos = car.pos.clone().addScaledVector(car.tangent, -(3.5 + len * 0.95)).addScaledVector(up, 1.3 + h * 0.95);
       look = car.pos.clone().addScaledVector(car.tangent, 7).addScaledVector(up, h * 0.55);

@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { rngFor, clamp, lerp, smoothstep } from '../core/rng.js';
 import { buildTrack } from './trackGen.js';
-import { buildCar, numberSprite, COLLIDERS } from './carFactory.js';
+import { buildCar, carLabel, positionBadge, COLLIDERS } from './carFactory.js';
 import { buildModelCar, modelMeta, shadowBlob, eyeFor } from './models.js';
 import { getScript, getFocusLayer, GRID_OFFSET } from '../engine/script.js';
 
@@ -90,16 +90,19 @@ export class RaceScene {
       const { group, wheels } = built;
       const height = built.meta ? built.meta.height : (race.tour.vehicle === 'baja' ? 3.4 : 2.4);
       const length = built.meta ? built.meta.length : this.col.len * 2;
-      const sprite = numberSprite(r.number, race.tour.accent);
-      sprite.position.y = height + 1.0;
+      const sprite = carLabel(r, race.tour.accent);
+      sprite.position.y = height + 1.1;
       group.add(sprite);
+      const badge = positionBadge(race.tour.accent);
+      badge.sprite.position.y = height + 1.1;
+      group.add(badge.sprite);
       this.scene.add(group);
       const eye = eyeFor(race.tour.vehicle, height, length);
       for (const w of wheels) w.userData.restY = w.position.y;
       const riderObj = group.getObjectByName('rider');
       if (riderObj) riderObj.userData.seat = { x: riderObj.position.x, y: riderObj.position.y };
       return {
-        group, wheels, sprite, height, length, eye,
+        group, wheels, sprite, badge, posSprite: badge.sprite, rank: 0, height, length, eye,
         glass: group.getObjectByName('glass') || null,
         stand: group.getObjectByName('stand') || null,
         rider: riderObj,
@@ -130,6 +133,7 @@ export class RaceScene {
       };
     });
     this.order = race.field.map((_, i) => i); // reused each frame, sorted by track position
+    this.rankTimer = 0;
     this.leaderIdx = 0;
     this.backIdx = 0;
     this.centroid = new THREE.Vector3();
@@ -379,6 +383,17 @@ export class RaceScene {
 
     // Pass 2 — push apart anything that overlaps.
     if (mode === 'race') this.separate(dt);
+
+    // Position badges: the leaderboard's order, a few times a second.
+    this.rankTimer -= dt;
+    if (this.rankTimer <= 0) {
+      this.rankTimer = 0.25;
+      const order = mode === 'grid' ? script.grid : script.standings(s, this.adj);
+      order.forEach((idx, k) => {
+        const c = cars[idx];
+        if (c.rank !== k + 1) { c.rank = k + 1; c.badge.set(k + 1); }
+      });
+    }
 
     // Pass 3 — place the cars in the world. Grid and race use the same
     // formula, so the launch continues from exactly where the cars stood.
