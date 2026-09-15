@@ -346,22 +346,39 @@
     // Rotations are right-handed about +X, so a hanging limb swings backward
     // under a positive angle and forward under a negative one.
     const J = { hip: 0.50, knee: 0.27, shoulder: 0.80, elbow: 0.64, neck: 0.87, legX: 0.06, shoulderX: 0.15, elbowX: 0.17 };
-    const A = {
-      lean: 0.85,     // torso onto the tank
-      head: 0.55,     // head pitched back up to look down the road
-      thigh: 1.35,    // thighs forward along the tank
-      shin: 2.2,      // knees bent, boots back on the pegs
-      splay: 0.09,    // knees out around the tank
-      upper: 0.4,     // upper arms forward from the shoulder
-      out: 0.6,       // elbows wide
-      fore: 1.8,      // elbows bent so the hands come up to the grips
-      yaw: 0.0,       // forearms swung inward to the grips
+    // Two figures from the one mesh: the rider's racing tuck for the bikes,
+    // and a seated driver for the cars — upright, thighs forward, feet at
+    // the pedals, arms out to a wheel.
+    const POSES = {
+      rider: {
+        lean: 0.85,     // torso onto the tank
+        head: 0.55,     // head pitched back up to look down the road
+        thigh: 1.35,    // thighs forward along the tank
+        shin: 2.2,      // knees bent, boots back on the pegs
+        splay: 0.09,    // knees out around the tank
+        upper: 0.4,     // upper arms forward from the shoulder
+        out: 0.6,       // elbows wide
+        fore: 1.8,      // elbows bent so the hands come up to the grips
+        yaw: 0.0,       // forearms swung inward to the grips
+      },
+      driver: {
+        lean: 0.15, head: 0.05, thigh: 1.45, shin: 0.9, splay: 0.03,
+        upper: 1.3, out: 0.12, fore: 0.3, yaw: 0.05,
+      },
     };
     const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     const rotAbout = (v, pivot, axis, angle) => { v.sub(pivot).applyAxisAngle(axis, angle).add(pivot); };
     const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
+    const baseGeo = geo;
+    const { liveryMaterial, loadLiveries, refreshAccents, placeRider } = await import('../src/three/models.js');
+    if (tex.rider) { window.__BR_LIVERIES__ = { rider: tex.rider }; await loadLiveries(); }
+
+    for (const [figure, A] of Object.entries(POSES)) {
+    const geo = baseGeo.clone();
     const pos = geo.attributes.position;
     const v = new THREE.Vector3();
+    const head = new THREE.Vector3(); let headN = 0;
+    const hands = new THREE.Vector3(); let handsN = 0;
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
       const x0 = v.x, y0 = v.y;
@@ -400,54 +417,60 @@
         rotAbout(v, new THREE.Vector3(0, J.hip, 0), X, A.lean * wTorso);
       }
       pos.setXYZ(i, v.x, v.y, v.z);
+      if (y0 > 0.9) { head.add(v); headN++; }
+      if (isArm && y0 < 0.45) { hands.x += Math.abs(v.x); hands.y += v.y; hands.z += v.z; handsN++; }
     }
-    // Hips at the origin: the bike's seat point is where this lands.
+    // Hips at the origin: the seat point is where this lands.
     geo.translate(0, -J.hip, 0);
+    head.divideScalar(Math.max(1, headN)).y -= J.hip;
+    hands.divideScalar(Math.max(1, handsN)).y -= J.hip;
     geo.computeVertexNormals();
     const posed = BGU.mergeVertices(geo, 1e-4);
     const pb = new THREE.Box3().setFromBufferAttribute(posed.attributes.position);
     const ps = pb.getSize(new THREE.Vector3());
 
     const riderRoot = new THREE.Group();
-    riderRoot.name = 'rider';
+    riderRoot.name = figure;
     const riderMesh = new THREE.Mesh(posed, PALETTE.primary);
     riderMesh.name = 'body';
     riderRoot.add(riderMesh);
-    riderRoot.userData = { vehicle: 'rider', length: +ps.z.toFixed(3), width: +ps.x.toFixed(3), height: +ps.y.toFixed(3), wheelRadius: 0, wheels: 0, hasUV: !!posed.attributes.uv,
-      // in units of standing height: how far the hips sit above the feet
-      hipHeight: J.hip };
-    meta.rider = { ...riderRoot.userData };
+    riderRoot.userData = { vehicle: figure, length: +ps.z.toFixed(3), width: +ps.x.toFixed(3), height: +ps.y.toFixed(3), wheelRadius: 0, wheels: 0, hasUV: !!posed.attributes.uv,
+      // in units of standing height: how far the hips sit above the feet, and
+      // where the head and hands ended up relative to the hips
+      hipHeight: J.hip,
+      head: head.toArray().map((x) => +x.toFixed(3)), hands: hands.toArray().map((x) => +x.toFixed(3)) };
+    meta[figure] = { ...riderRoot.userData };
 
-    // Preview: on the bike, in the game's own placement, with a team recolour.
-    const { liveryMaterial, loadLiveries, refreshAccents, placeRider } = await import('../src/three/models.js');
+    // Preview: the rider on the bike, in the game's own placement, with a
+    // team recolour; the driver on his own.
     if (tex.rider) {
-      window.__BR_LIVERIES__ = { rider: tex.rider };
-      await loadLiveries();
-      meta.rider.accents = refreshAccents('rider', [posed]).map((h) => h < 0 ? null : Math.round(h * 360) + '°');
+      if (figure === 'rider') meta.rider.accents = refreshAccents('rider', [posed]).map((h) => h < 0 ? null : Math.round(h * 360) + '°');
       riderMesh.material = liveryMaterial('rider', ['#2ecc40', '#ffd12a']);
     }
     if (window.__prev) scene.remove(window.__prev);
     const combo = new THREE.Group();
     const bike = window.__motoRoot;
-    if (bike) combo.add(bike);
+    if (figure === 'rider' && bike) combo.add(bike);
     const seated = riderRoot.clone();
-    placeRider(seated, bike ? bike.userData : { height: 1.35, length: 2.2 });
+    if (figure === 'rider') placeRider(seated, bike ? bike.userData : { height: 1.35, length: 2.2 });
+    else { seated.scale.setScalar(1.72); seated.position.y = 0.5; }
     combo.add(seated);
     scene.add(combo);
     window.__prev = combo;
-    shots.rider = {};
+    shots[figure] = {};
     const L = 2.2;
     for (const [k, p] of Object.entries({ threeq: [L * 1.1, L * 0.7, L * 1.3], side: [L * 1.9, L * 0.45, 0], front: [0, L * 0.5, L * 2.0], rear: [0, L * 0.6, -L * 1.9] })) {
       cam.position.set(...p); cam.lookAt(0, 0.7, 0); cam.updateProjectionMatrix();
       renderer.render(scene, cam);
-      shots.rider[k] = renderer.domElement.toDataURL('image/png');
+      shots[figure][k] = renderer.domElement.toDataURL('image/png');
     }
     riderMesh.material = PALETTE.primary;
     const glb = await new GLTFExporter().parseAsync(riderRoot, { binary: true });
     const bytes = new Uint8Array(glb);
     let bin = '';
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-    out.rider = btoa(bin);
+    out[figure] = btoa(bin);
+    }
   }
 
   document.getElementById('out').textContent = JSON.stringify(meta, null, 2);

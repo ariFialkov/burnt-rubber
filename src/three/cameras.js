@@ -98,6 +98,11 @@ export class CameraRig {
     this.smoothLook.lerp(look, kl);
     cam.lookAt(this.smoothLook);
     cam.fov += (fov - cam.fov) * (this.snap ? 1 : 1 - Math.exp(-3 * dt));
+    // In the driver's seat the halo and pillars pass within centimetres of
+    // the eye, so the near plane comes right in (and the far plane back, to
+    // keep depth precision).
+    cam.near = this.mode === 'cockpit' ? 0.05 : 0.25;
+    cam.far = this.mode === 'cockpit' ? 2500 : 6000;
     cam.updateProjectionMatrix();
     this.snap = false;
   }

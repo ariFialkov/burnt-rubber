@@ -8,6 +8,7 @@
 // the two livery materials are per car.
 
 import * as THREE from 'three';
+import { cockpitFor } from './cockpit.js';
 import { GLTFLoader } from '../../vendor/jsm/loaders/GLTFLoader.js';
 
 export const MODEL_FILES = {
@@ -17,6 +18,7 @@ export const MODEL_FILES = {
   baja: 'assets/models/baja.glb',
   moto: 'assets/models/moto.glb',
   rider: 'assets/models/rider.glb', // seated on every bike
+  driver: 'assets/models/driver.glb', // the same figure, seated in every car
 };
 
 const templates = new Map(); // vehicle -> { meta, parts: {role: geometry}, wheels: [{geometry, position, radius}] }
@@ -33,6 +35,11 @@ export const LIVERY_VEHICLES = ['formula', 'stock', 'rally', 'baja', 'moto', 'ri
 // Shared, look-alike materials: one each for the whole field.
 const SHARED = {
   glass: new THREE.MeshStandardMaterial({ color: 0x0e141c, metalness: 0.7, roughness: 0.12 }),
+  // Glazing you can see through: a dark tint on the cars (the driver shows
+  // through it), a barely-there screen on the bikes.
+  tint: new THREE.MeshStandardMaterial({ color: 0x33475c, metalness: 0.6, roughness: 0.1, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }),
+  screen: new THREE.MeshStandardMaterial({ color: 0xc4d9ec, metalness: 0.5, roughness: 0.08, transparent: true, opacity: 0.26, depthWrite: false, side: THREE.DoubleSide }),
+  interior: new THREE.MeshStandardMaterial({ color: 0x0f1115, metalness: 0.1, roughness: 0.95 }),
   dark: new THREE.MeshStandardMaterial({ color: 0x23262c, metalness: 0.25, roughness: 0.65 }),
   wheel: new THREE.MeshStandardMaterial({ color: 0x141618, metalness: 0.05, roughness: 0.9 }),
 };
@@ -278,6 +285,15 @@ export function shadowBlob(width, length) {
 // Where the rider's hips sit on the bike, as fractions of the bike's height
 // and length (+Z forward), and the rider's standing height in metres.
 export const RIDER_SEAT = { y: 0.58, z: -0.10, height: 1.72, lean: 0.0 };
+// Seat the driver so the head lands on the driver camera's eye point.
+export const DRIVER_HEIGHT = 1.72;
+export function placeDriver(obj, C, meta) {
+  const H = DRIVER_HEIGHT;
+  const head = meta.head || [0, 0.42, 0.05];
+  obj.scale.setScalar(H);
+  obj.position.set(C.eye.x - head[0] * H, C.eye.y - head[1] * H, C.eye.z - head[2] * H);
+  return obj;
+}
 export function placeRider(obj, motoMeta) {
   obj.scale.setScalar(RIDER_SEAT.height);
   obj.position.set(0, motoMeta.height * RIDER_SEAT.y, motoMeta.length * RIDER_SEAT.z);
@@ -315,9 +331,10 @@ export function buildModelCar(vehicle, colors) {
   const livery = hasLivery(vehicle) ? liveryMaterial(vehicle, colors) : null;
   const paint = livery || new THREE.MeshStandardMaterial({ color: primary, metalness: 0.35, roughness: 0.32, envMap });
   const trim = livery || new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.3, roughness: 0.4, envMap });
+  const glazing = vehicle === 'moto' ? SHARED.screen : SHARED.tint;
   const mats = livery
-    ? { primary: livery, secondary: livery, glass: livery, dark: livery } // the atlas paints everything
-    : { primary: paint, secondary: trim, glass: SHARED.glass, dark: SHARED.dark };
+    ? { primary: livery, secondary: livery, glass: glazing, dark: livery } // the atlas paints the bodywork
+    : { primary: paint, secondary: trim, glass: glazing, dark: SHARED.dark };
   for (const [role, geometry] of Object.entries(t.parts)) {
     const m = new THREE.Mesh(geometry, mats[role] || SHARED.dark);
     m.name = role;
@@ -340,6 +357,27 @@ export function buildModelCar(vehicle, colors) {
       group.add(placeRider(r, t.meta));
     } else {
       group.add(rider(primary, secondary, t.meta));
+    }
+  } else {
+    // A driver in the seat, head at the driver camera's eye so the onboard
+    // view looks out of the helmet with the arms on the wheel; behind the
+    // tinted glass a dark interior mass so the cabin doesn't read hollow.
+    const dt = templates.get('driver');
+    const C = cockpitFor(vehicle);
+    if (dt) {
+      const mat = hasLivery('rider') ? liveryMaterial('rider', colors) : new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.1, roughness: 0.7, envMap });
+      const d = new THREE.Mesh(dt.parts.body, mat);
+      d.name = 'driver';
+      placeDriver(d, C, dt.meta);
+      group.add(d);
+    }
+    if (C.cabin) {
+      const { halfW, floorY, backZ, frontZ } = C.cabin;
+      const top = C.eye.y - 0.45;
+      const block = new THREE.Mesh(new THREE.BoxGeometry(halfW * 1.8, top - floorY, frontZ - backZ - 0.1), SHARED.interior);
+      block.name = 'interior';
+      block.position.set(0, (top + floorY) / 2, (frontZ + backZ) / 2);
+      group.add(block);
     }
   }
   group.add(shadowBlob(t.meta.width, t.meta.length));

@@ -19,7 +19,7 @@ export const COCKPIT = {
     // cockpit opening around z 0 whose cowling ahead tops out near y 1.06,
     // so the eye sits between the two and only the wheel is added, down in
     // the opening.
-    eye: { x: 0, y: 1.13, z: -0.10 }, look: { down: 0.08 },
+    eye: { x: 0, y: 1.11, z: -0.10 }, look: { down: 0.08 },
     open: true,
     wheel: { x: 0, y: 0.93, z: 0.25, r: 0.12, tilt: 0.6, shape: 'formula' },
   },
@@ -31,14 +31,17 @@ export const COCKPIT = {
     cage: true,
   },
   rally: {
-    eye: { x: 0.34, y: 1.18, z: -0.30 }, look: { down: 0.07 },
+    eye: { x: 0.34, y: 1.28, z: -0.30 }, look: { down: 0.09 },
     cabin: { halfW: 0.88, floorY: 0.40, roofY: 1.58, backZ: -1.0, frontZ: 0.15, screenTopZ: 0.08, screenBaseZ: 0.62, screenBaseY: 0.98 },
     dash: { y: 0.97, z: 0.5, depth: 0.36, h: 0.16, style: 'rally' },
     wheel: { x: 0.34, y: 0.97, z: 0.18, r: 0.18, tilt: 0.42 },
     cage: true,
   },
   baja: {
-    eye: { x: 0.34, y: 1.55, z: -0.30 }, look: { down: 0.13 },
+    eye: { x: 0.34, y: 1.68, z: -0.30 }, look: { down: 0.14 },
+    // The model's windscreen has a triangle wound inside-out that renders
+    // opaque from within; clip the whole windscreen region away in this view.
+    clip: { y0: 1.3, y1: 2.1, z0: 0.0, z1: 0.8 },
     cabin: { halfW: 0.98, floorY: 0.80, roofY: 1.98, backZ: -0.95, frontZ: 0.2, screenTopZ: 0.12, screenBaseZ: 0.6, screenBaseY: 1.38 },
     dash: { y: 1.34, z: 0.52, depth: 0.4, h: 0.18, style: 'baja' },
     wheel: { x: 0.34, y: 1.32, z: 0.18, r: 0.19, tilt: 0.35 },
@@ -196,8 +199,10 @@ export function buildCockpitKit(vehicle) {
     face.rotation.y = Math.PI; // toward -Z, the driver
     face.rotation.x = -0.25;
     kit.add(face);
-    // Centre console between the seats.
+    // Centre console between the seats, and a solid footwell under the dash
+    // so the front wheels never show through the floor.
     kit.add(box(0.28, 0.32, 0.9, MAT.trim, 0, floorY + 0.16, backZ + 0.7));
+    kit.add(box(halfW * 2, D.y - D.h / 2 - floorY, 0.9, MAT.shell, 0, (D.y - D.h / 2 + floorY) / 2, frontZ + 0.45));
     if (C.cage) {
       const r = C.cageBig ? 0.03 : 0.024;
       const z0 = backZ + 0.12, z1 = frontZ - 0.05, yT = roofY - 0.07;

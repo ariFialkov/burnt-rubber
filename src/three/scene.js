@@ -6,7 +6,7 @@ import { rngFor, clamp, lerp, smoothstep } from '../core/rng.js';
 import { buildTrack } from './trackGen.js';
 import { buildCar, carLabel, positionBadge, COLLIDERS } from './carFactory.js';
 import { buildModelCar, modelMeta, shadowBlob, eyeFor } from './models.js';
-import { buildCockpitKit } from './cockpit.js';
+import { buildCockpitKit, cockpitFor } from './cockpit.js';
 import { getScript, getFocusLayer, GRID_OFFSET } from '../engine/script.js';
 
 const FWD = new THREE.Vector3(0, 0, 1);
@@ -108,6 +108,9 @@ export class RaceScene {
         glass: group.getObjectByName('glass') || null,
         stand: group.getObjectByName('stand') || null,
         rider: riderObj,
+        driver: group.getObjectByName('driver') || null,
+        interior: group.getObjectByName('interior') || null,
+        bodyMeshes: ['primary', 'secondary', 'dark'].map((n) => group.getObjectByName(n)).filter(Boolean),
         // Body state: suspension roll/pitch (with their velocities), drift
         // angle, bike lean, filtered loads, gravel-bump phase, stand angle.
         roll: 0, rollV: 0, pitch: 0, pitchV: 0, drift: 0, lean: 0,
@@ -147,9 +150,10 @@ export class RaceScene {
   // Cockpit view looks out through the glazing, which is opaque — hide it on
   // the car being driven and restore it on everything else.
   setSeeThrough(idx) {
+    const keep = this.race.tour.vehicle === 'moto'; // the bike's screen is see-through anyway
     for (let i = 0; i < this.cars.length; i++) {
       const g = this.cars[i].glass;
-      if (g) g.visible = i !== idx;
+      if (g) g.visible = keep || i !== idx;
     }
   }
 
@@ -161,13 +165,41 @@ export class RaceScene {
       const prev = this.cars[this.kitOn];
       if (this.kit) prev.group.remove(this.kit);
       if (prev.rider) prev.rider.visible = true;
+      if (prev.interior) prev.interior.visible = true;
+      for (const m of prev.bodyMeshes) { m.material.clippingPlanes = null; m.material.clipIntersection = false; }
     }
     this.kitOn = idx;
     if (idx < 0) return;
     if (!this.kit) this.kit = buildCockpitKit(this.race.tour.vehicle);
     const car = this.cars[idx];
     car.group.add(this.kit);
-    if (car.rider) car.rider.visible = false;
+    if (car.rider) car.rider.visible = false;   // would fill the lens
+    if (car.interior) car.interior.visible = false; // the kit has its own
+    // Clip away a region of the bodywork (a windscreen wound inside-out);
+    // the planes are kept in world space by poseBody every frame.
+    const clip = cockpitFor(this.race.tour.vehicle).clip;
+    if (clip) {
+      this.clipPlanes = this.clipPlanes || [0, 1, 2, 3].map(() => new THREE.Plane());
+      for (const m of car.bodyMeshes) { m.material.clippingPlanes = this.clipPlanes; m.material.clipIntersection = true; }
+    }
+  }
+
+  // The windscreen clip box, from the car's frame into the world.
+  updateClipPlanes(car) {
+    const clip = cockpitFor(this.race.tour.vehicle).clip;
+    if (!clip || !this.clipPlanes) return;
+    const g = car.group;
+    const n = new THREE.Vector3(), p = new THREE.Vector3();
+    const set = (k, nx, ny, nz, px, py, pz) => {
+      n.set(nx, ny, nz).applyQuaternion(g.quaternion);
+      p.set(px, py, pz).applyMatrix4(g.matrixWorld);
+      this.clipPlanes[k].setFromNormalAndCoplanarPoint(n, p);
+    };
+    // A point is clipped only when on the clipped side of all four: inside the box.
+    set(0, 0, -1, 0, 0, clip.y0, 0);
+    set(1, 0, 1, 0, 0, clip.y1, 0);
+    set(2, 0, 0, -1, 0, 0, clip.z0);
+    set(3, 0, 0, 1, 0, 0, clip.z1);
   }
 
   setFocus(idx) {
@@ -545,6 +577,8 @@ export class RaceScene {
     // The steering wheel in the cockpit kit turns with the road ahead and
     // whatever the car is steering across.
     if (this.kit && this.kit.parent === car.group) {
+      car.group.updateMatrixWorld();
+      this.updateClipPlanes(car);
       const wheel = this.kit.getObjectByName('wheel');
       if (wheel) {
         const target = clamp(turn * 3 + car.yaw * 4, -1.2, 1.2);

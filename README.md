@@ -140,7 +140,11 @@ Five cameras:
   cabin shell, dashboard with dials, steering wheel that turns with the
   road, pillars, and the class's own furniture (halo, roll cage) — attached
   to whichever car the camera is riding; a bike hides its rider and looks
-  over the bars
+  over the bars through its screen. Every car carries a driver (the rider
+  figure in a second, seated pose from the same pipeline), head on the
+  camera's eye point so the onboard view looks out of the helmet with the
+  arms on the wheel, and the glazing is tinted rather than opaque so the
+  driver shows through it from outside
 - **Hood-back**: a reverse angle — a boom out ahead of the nose, above hood
   height, looking back over the car at whoever is chasing it
 - **Cinematic**: trackside cameras auto-placed at the highest-curvature
@@ -175,8 +179,9 @@ its own node hinged at the axle; the rest is grouped into `primary` and
 livery materials. Paint is physically based with a baked studio reflection,
 each car casts a soft contact shadow, and the bike gets a rider.
 
-**The rider.** `assets/fbx-src/rider_tex.fbx` is a static A-pose figure. The
-pipeline poses it in code — the mesh is split by height and width into legs,
+**The rider and driver.** `assets/fbx-src/rider_tex.fbx` is a static A-pose
+figure. The pipeline poses it in code, twice — a racing tuck for the bikes
+and a seated driver for the cars — — the mesh is split by height and width into legs,
 arms, torso and head, and each limb is bent about its joint (knees to the
 pegs, elbows to the grips, torso onto the tank, helmet pitched up to the
 road) — then exports it as `rider.glb` with the hips at the origin. At
