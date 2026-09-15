@@ -120,6 +120,9 @@ export class RaceScene {
         drs: group.getObjectByName('drs') || null,
         steer: 0, braking: false, brakeHold: 0, drsOpen: false, drsAng: 0, dashTimer: rand(),
         needleSpeed: 0, needleRpm: 0.1, gear: 1,
+        // How late this driver brakes (seconds of look-ahead) and where in
+        // the flash cycle this car's rain light sits.
+        brakePoint: 1.15 - 0.45 * (r.stats.aggression / 100) + rand() * 0.1, blinkPhase: rand() * 0.5,
         interior: group.getObjectByName('interior') || null,
         bodyMeshes: ['primary', 'secondary', 'dark'].map((n) => group.getObjectByName(n)).filter(Boolean),
         // Body state: suspension roll/pitch (with their velocities), drift
@@ -587,16 +590,35 @@ export class RaceScene {
       for (const w of car.wheels) if (w.userData.front) w.rotation.y = -car.steer; // +Y turns the nose left
     }
 
-    // Brake lights: on under deceleration or when a sharp bend is coming at
-    // speed, held a beat so they read. The formula car's single light is a
-    // rain light that flashes only in the wet; the bike's stays on in the wet.
+    // Brake lights come on in the braking zone: when the car is carrying
+    // more speed than the bend ahead (a driver's reaction time away, later
+    // for an aggressive driver) can take for its class — and go off again
+    // once it is in the corner. Real deceleration lights them too. The
+    // formula car's single light is a rain light that flashes only in the
+    // wet, each car on its own phase; the bike's stays on in the wet.
+    {
+      const look = v * car.brakePoint + 6;
+      const uA = (((car.dist + look) / lapLen) % 1 + 1) % 1, uB = (((car.dist + look + 8) / lapLen) % 1 + 1) % 1;
+      const tA = this.track.curve.getTangentAt(uA), tB = this.track.curve.getTangentAt(uB);
+      const kAhead = Math.abs(Math.atan2(tA.x * tB.z - tA.z * tB.x, tA.dot(tB))) / 8;   // curvature ahead (1/m)
+      const kHere = Math.abs(turn) / 8;
+      // A corner worth braking for, by class (tighter than this radius), seen
+      // coming while the road here is still straighter: one stab of brakes
+      // per corner entry, its length the driver's, then nothing until the
+      // next corner. Hard deceleration lights them for as long as it lasts.
+      const rMin = { formula: 48, stock: 55, rally: 40, baja: 34, moto: 40 }[vehicle] || 45;
+      const entry = kAhead > 1 / rMin && kHere < kAhead * 0.6 && v > 8;
+      car.brakeCool = Math.max(0, (car.brakeCool || 0) - dt);
+      if (racing && entry && car.brakeCool <= 0) {
+        car.brakeHold = 0.35 + 0.35 * (car.brakePoint - 0.7); // 0.35–0.6 s
+        car.brakeCool = 2.2;
+      }
+      car.brakeHold = Math.max(0, car.brakeHold - dt);
+      car.braking = racing && (car.brakeHold > 0 || car.lonAcc < -4);
+    }
     if (car.lamps.length) {
-      const sharp = Math.abs(turn) > 0.22 && v > this.script.pace.cruise * 0.45;
-      const braking = racing && (car.lonAcc < -1.5 || sharp);
-      if (braking) car.brakeHold = 0.35; else car.brakeHold = Math.max(0, car.brakeHold - dt);
-      car.braking = car.brakeHold > 0;
       let lit;
-      if (vehicle === 'formula') lit = this.race.wet && racing && Math.floor(t * 4) % 2 === 0;
+      if (vehicle === 'formula') lit = this.race.wet && racing && Math.floor((t + car.blinkPhase) * 4) % 2 === 0;
       else if (vehicle === 'moto') lit = this.race.wet && racing;
       else lit = car.braking;
       const mat = lit ? LAMP.on : LAMP.off;
