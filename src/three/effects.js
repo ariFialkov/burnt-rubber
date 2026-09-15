@@ -5,6 +5,9 @@
 // the new quads uploaded each frame). Dirt classes lay shallow tracks the
 // whole way and deeper ones under braking and cornering load; tarmac classes
 // only leave black rubber when they are braking or loading the tyres hard.
+// The ring is sized to hold a whole race for the biggest dirt field, and if
+// it ever does wrap, a mark fades out as the head approaches its slot rather
+// than vanishing the frame it is overwritten.
 //
 // Particles — dust, mud, wet sand, gravel flecks — are point sprites with a
 // per-particle world size, colour and fade, updated on the CPU in a ring
@@ -22,7 +25,7 @@ export const SURFACE = {
   baja:    { kind: 'dirt', mark: 0x5a4530, shallowAlpha: 0.09, hardAlpha: 0.32, width: 0.34, dust: 0xcdb289, mud: 0x5c4630, big: true },
 };
 
-const MAX_MARKS = 36000;      // quads in the ring
+const MAX_MARKS = 80000;      // quads in the ring (~57k laid in a 40-truck dirt race)
 const MAX_PARTICLES = 6000;
 
 let softTex = null;
@@ -54,18 +57,49 @@ export class SurfaceFX {
     this.mCol = new THREE.BufferAttribute(new Float32Array(MAX_MARKS * 4 * 4), 4);
     this.mPos.setUsage(THREE.DynamicDrawUsage);
     this.mCol.setUsage(THREE.DynamicDrawUsage);
+    // Each vertex knows its quad's ring slot (static): the shader fades a mark
+    // out over the last quarter of its ring life, measured from the head.
+    const slot = new Float32Array(MAX_MARKS * 4);
     const idx = new Uint32Array(MAX_MARKS * 6);
     for (let q = 0; q < MAX_MARKS; q++) {
       const v = q * 4, i = q * 6;
+      slot[v] = slot[v + 1] = slot[v + 2] = slot[v + 3] = q;
       // wound to face up (+Y): the road is seen from above
       idx[i] = v; idx[i + 1] = v + 2; idx[i + 2] = v + 1; idx[i + 3] = v; idx[i + 4] = v + 3; idx[i + 5] = v + 2;
     }
     mg.setIndex(new THREE.BufferAttribute(idx, 1));
     mg.setAttribute('position', this.mPos);
-    mg.setAttribute('color', this.mCol);
+    mg.setAttribute('aCol', this.mCol);
+    mg.setAttribute('aSlot', new THREE.BufferAttribute(slot, 1));
     mg.setDrawRange(0, 0);
+    this.mMat = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uHead: { value: 0 } }]),
+      vertexShader: `
+        attribute vec4 aCol; attribute float aSlot; uniform float uHead; varying vec4 vCol;
+        #include <fog_pars_vertex>
+        void main() {
+          float rem = mod(aSlot - uHead + ${MAX_MARKS}.0, ${MAX_MARKS}.0) / ${MAX_MARKS}.0;
+          vCol = vec4(aCol.rgb, aCol.a * smoothstep(0.0, 0.25, rem));
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: `
+        varying vec4 vCol;
+        #include <fog_pars_fragment>
+        void main() {
+          gl_FragColor = vCol;
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          #include <fog_fragment>
+        }`,
+      fog: true, transparent: true, depthWrite: false,
+      // pulled toward the camera in depth-buffer units, so a mark a few
+      // centimetres above the road still wins the depth test far away
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6,
+    });
     // Never culled: the bounding sphere would have to grow with every quad.
-    const marks = new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    const marks = new THREE.Mesh(mg, this.mMat);
     marks.frustumCulled = false;
     marks.renderOrder = 1;
     scene.add(marks);
@@ -157,7 +191,9 @@ export class SurfaceFX {
     const S = this.spec;
     if (jumped || !track.last) { track.last = p.clone(); track.lastHard = hard; return; }
     const d = Math.hypot(p.x - track.last.x, p.z - track.last.z);
-    const spacing = hard ? 1.2 : 2.6;
+    // Quads are laid end to end, so spacing only sets how faithfully a curve
+    // is followed (a 2.4 m chord on a 40 m corner is 2 cm off, under the width).
+    const spacing = S.kind === 'dirt' ? (hard ? 1.6 : 2.4) : 1.2;
     if (d < spacing) return;
     if (d > 25) { track.last.copy(p); return; } // teleport (lap wrap, reset)
     if (S.kind === 'dirt') {
@@ -252,6 +288,7 @@ export class SurfaceFX {
       this.marks.geometry.setDrawRange(0, this.mCount * 6);
       this.mDirty.length = 0;
     }
+    this.mMat.uniforms.uHead.value = this.mHead;
     // Particles: integrate everything alive.
     const P = this.pPos.array, C = this.pCol.array, Sz = this.pSize.array;
     for (let i = 0; i < MAX_PARTICLES; i++) {
@@ -272,7 +309,7 @@ export class SurfaceFX {
   }
 
   dispose() {
-    this.marks.geometry.dispose(); this.marks.material.dispose();
+    this.marks.geometry.dispose(); this.mMat.dispose();
     this.points.geometry.dispose(); this.pMat.dispose();
   }
 }

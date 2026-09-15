@@ -234,7 +234,11 @@ and throw up behind them into two draw calls. Tyre marks are quads laid
 from each rear wheel's contact point into a ring-buffered mesh: rally cars
 and trophy trucks rut shallow tracks the whole way and deeper ones under
 braking, heavy cornering or a slide (darker when wet); tarmac classes only
-leave black rubber from a locked-up braking stab. Particles are point
+leave black rubber from a locked-up braking stab. The ring holds a whole
+race for the biggest dirt field, and if it ever wraps a mark fades out as
+the head approaches its slot instead of vanishing when overwritten (the
+dirt laps are short enough that a smaller ring was recycling ruts in
+patches right in front of the pack). Particles are point
 sprites with a per-particle world size and fade: dust plumes on dry dirt
 and sand, mud or wet sand clods on a ballistic arc when wet, the odd fleck
 of gravel off the stock car's oval, a wisp of tyre smoke off a lock-up on
