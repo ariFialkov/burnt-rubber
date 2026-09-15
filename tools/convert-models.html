@@ -237,6 +237,30 @@
     size = box.getSize(new THREE.Vector3());
     const c = box.getCenter(new THREE.Vector3());
     geo.translate(-c.x, -box.min.y, -c.z);
+    // Baja: the windscreen has triangles wound inside-out (they rendered as
+    // an opaque black triangle from the driver's seat). Any triangle in the
+    // windscreen zone whose winding faces the cabin is turned around.
+    if (vehicle === 'baja') {
+      const P = geo.attributes.position, U = geo.attributes.uv;
+      const cabin = new THREE.Vector3(0, 1.5, -0.3);
+      const a = new THREE.Vector3(), b2 = new THREE.Vector3(), c2 = new THREE.Vector3(), n = new THREE.Vector3();
+      let flipped = 0;
+      for (let t = 0; t < P.count / 3; t++) {
+        a.fromBufferAttribute(P, 3 * t); b2.fromBufferAttribute(P, 3 * t + 1); c2.fromBufferAttribute(P, 3 * t + 2);
+        const cx = (a.x + b2.x + c2.x) / 3, cy = (a.y + b2.y + c2.y) / 3, cz = (a.z + b2.z + c2.z) / 3;
+        if (!(Math.abs(cx) < 0.95 && cy > 1.35 && cy < 1.95 && cz > 0.45 && cz < 1.0)) continue;
+        n.copy(b2).sub(a).cross(c2.clone().sub(a));
+        if (n.dot(new THREE.Vector3(cx, cy, cz).sub(cabin)) >= 0) continue;
+        // swap the second and third vertices: position and uv
+        for (const attr of [P, U]) {
+          if (!attr) continue;
+          const i1 = 3 * t + 1, i2 = 3 * t + 2;
+          for (let k = 0; k < attr.itemSize; k++) { const tmp = attr.array[i1 * attr.itemSize + k]; attr.array[i1 * attr.itemSize + k] = attr.array[i2 * attr.itemSize + k]; attr.array[i2 * attr.itemSize + k] = tmp; }
+        }
+        flipped++;
+      }
+      console.log('baja: windscreen triangles turned outward:', flipped);
+    }
     geo.computeVertexNormals(); // scale/rotate are uniform, but be safe
 
     const shells = splitShells(geo);

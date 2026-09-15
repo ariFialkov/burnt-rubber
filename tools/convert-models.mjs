@@ -28,6 +28,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('PAGEERROR', String(e)));
+page.on('console', (m) => { if (/baja:/.test(m.text())) console.log(m.text()); });
 await page.goto(`${BASE}/tools/convert-models.html`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => window.__glb, null, { timeout: 120000 });
 
