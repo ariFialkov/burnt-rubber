@@ -608,13 +608,17 @@ export class RaceScene {
       // next corner. Hard deceleration lights them for as long as it lasts.
       const rMin = { formula: 48, stock: 55, rally: 40, baja: 34, moto: 40 }[vehicle] || 45;
       const entry = kAhead > 1 / rMin && kHere < kAhead * 0.6 && v > 8;
+      // Deceleration through a slow filter: the frame-to-frame figure is
+      // noisy and would flicker the lights at the threshold.
+      car.lonAccSlow = (car.lonAccSlow || 0) + (car.lonAcc - (car.lonAccSlow || 0)) * Math.min(1, 2.5 * dt);
+      const hard = car.lonAccSlow < -5;
       car.brakeCool = Math.max(0, (car.brakeCool || 0) - dt);
-      if (racing && entry && car.brakeCool <= 0) {
-        car.brakeHold = 0.35 + 0.35 * (car.brakePoint - 0.7); // 0.35–0.6 s
+      if (racing && (entry || hard) && car.brakeCool <= 0) {
+        car.brakeHold = 0.35 + 0.35 * (car.brakePoint - 0.7) + (hard ? 0.3 : 0); // 0.35–0.9 s
         car.brakeCool = 2.2;
       }
       car.brakeHold = Math.max(0, car.brakeHold - dt);
-      car.braking = racing && (car.brakeHold > 0 || car.lonAcc < -4);
+      car.braking = racing && car.brakeHold > 0;
     }
     if (car.lamps.length) {
       let lit;
