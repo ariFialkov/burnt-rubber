@@ -2,11 +2,12 @@
 // and drives car transforms from the deterministic race script.
 
 import * as THREE from 'three';
-import { rngFor, clamp, lerp, smoothstep } from '../core/rng.js';
+import { rngFor, clamp, lerp, smoothstep, mulberry32 } from '../core/rng.js';
 import { buildTrack } from './trackGen.js';
 import { buildCar, carLabel, positionBadge, COLLIDERS } from './carFactory.js';
 import { buildModelCar, modelMeta, shadowBlob, eyeFor, LAMP } from './models.js';
 import { buildCockpitKit, cockpitFor, updateInstruments } from './cockpit.js';
+import { SurfaceFX } from './effects.js';
 import { getScript, getFocusLayer, GRID_OFFSET } from '../engine/script.js';
 
 const FWD = new THREE.Vector3(0, 0, 1);
@@ -155,6 +156,10 @@ export class RaceScene {
     this.rankTimer = 0;
     this.kit = null;   // the driver's-eye interior, built on first use
     this.kitOn = -1;   // which car carries it
+    // Tyre marks and dust/mud/gravel, per surface and weather.
+    this.fx = new SurfaceFX(this.scene, race.tour.vehicle, race.wet, race.field.length);
+    this.fxRand = mulberry32(12345);
+    for (const c of this.cars) c.tracks = c.wheels.filter((w) => !w.userData.front).map((w) => ({ wheel: w, last: null, lastHard: false }));
 
     this.leaderIdx = 0;
     this.backIdx = 0;
@@ -415,6 +420,7 @@ export class RaceScene {
         car.laneVel = 0;
         car.lane = this.gridLane(script.gridSlotOf[i]);
         car.laneFresh = true;
+        car.jumped = true; // don't draw a mark from wherever it was to here
       } else {
         const shown = live ? Math.max(scripted, car.shown + minStep) : scripted;
         car.speed = Math.max(0, (shown - car.shown) / Math.max(dt, 1e-3));
@@ -475,6 +481,7 @@ export class RaceScene {
       const tangent = this.track.curve.getTangentAt(u);
       const nrm = new THREE.Vector3(-tangent.z, 0, tangent.x);
       const pos = p.clone().addScaledVector(nrm, car.lane);
+      car.groundY = p.y; // the road surface under the car, before any bounce
       if (mode === 'grid') pos.y += Math.sin(wallTime * 30 + i) * 0.015; // idle vibration
 
       // Point the car where it is actually going: the track direction plus
@@ -487,6 +494,11 @@ export class RaceScene {
       car.tangent.copy(tangent);
       this.poseBody(car, tangent, mode, t, Math.min(dt, 0.05));
     }
+
+    // Surface effects: each rear wheel lays its track and throws up its
+    // dust, from where the tyre actually meets the road.
+    if (mode === 'race') this.surface(dt, t);
+    this.fx.update(dt);
 
     if (mode === 'race') {
       this.spread = maxD - minD;
@@ -538,6 +550,7 @@ export class RaceScene {
     // minimal rotation — that flips a car over where the road dips.
     const fwd = tangent.clone().applyAxisAngle(UP, -car.yaw + car.drift).normalize();
     const left = UP.clone().cross(fwd).normalize();
+    car.fwd = fwd; car.left = left;
     const up = fwd.clone().cross(left).normalize();
     car.group.position.copy(car.pos);
     car.group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(left, up, fwd));
@@ -616,6 +629,7 @@ export class RaceScene {
       if (racing && (entry || hard) && car.brakeCool <= 0) {
         car.brakeHold = 0.35 + 0.35 * (car.brakePoint - 0.7) + (hard ? 0.3 : 0); // 0.35–0.9 s
         car.brakeCool = 2.2;
+        car.lockUp = this.fxRand() < 0.4; // this stab leaves rubber
       }
       car.brakeHold = Math.max(0, car.brakeHold - dt);
       car.braking = racing && car.brakeHold > 0;
@@ -748,11 +762,41 @@ export class RaceScene {
     }
   }
 
+  surface(dt, t) {
+    const vehicle = this.race.tour.vehicle;
+    const grip = { formula: 32, stock: 16, rally: 12, baja: 9, moto: 18 }[vehicle] || 14;
+    const cruise = this.script.pace.cruise;
+    const rng = this.fxRand;
+    const pt = new THREE.Vector3();
+    for (const car of this.cars) {
+      if (!car.tracks || !car.fwd) continue;
+      const dirt = vehicle === 'rally' || vehicle === 'baja';
+      // Dirt ruts deeper under braking, heavy cornering or a slide; tarmac
+      // only takes rubber from a locked-up stab (every corner here would
+      // otherwise exceed a load threshold — the tracks are tight for the pace).
+      const loaded = Math.abs(car.latAcc) > grip * 0.9 || Math.abs(car.drift) > 0.15;
+      const hard = dirt ? (car.braking || loaded) : (car.braking && car.lockUp);
+      car.group.updateMatrixWorld();
+      for (const tr of car.tracks) {
+        pt.set(tr.wheel.position.x, 0, tr.wheel.position.z);
+        car.group.localToWorld(pt);
+        pt.y = car.groundY + 0.075;
+        this.fx.wheel(tr, pt, hard, car.jumped);
+        this.fx.emit(pt, car.fwd, car.left, car.speedS, cruise, hard, dt, rng);
+      }
+      car.jumped = false;
+    }
+  }
+
+  // Point sprites need the viewport to size themselves in metres.
+  setCamera(camera, viewportHeight) { this.fx.setCamera(camera, viewportHeight); }
+
   standingsNow(tRace) {
     return this.script.standings(clamp(tRace / this.script.T, 0, 1), this.adj);
   }
 
   dispose() {
+    this.fx.dispose();
     this.scene.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
       if (o.material) {

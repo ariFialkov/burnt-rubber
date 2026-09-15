@@ -198,6 +198,7 @@ function frame(nowMs) {
   if (ctx.view === 'live' && ctx.selectedCarIdx >= st.race.field.length) ctx.selectedCarIdx = 0;
   rig.carIdx = ctx.view === 'live' ? ctx.selectedCarIdx : scene.leaderIdx;
   rig.update(scene, dt);
+  scene.setCamera(rig.camera, innerHeight);
   renderer.render(scene.scene, rig.camera);
 
   // UI updates (throttled)

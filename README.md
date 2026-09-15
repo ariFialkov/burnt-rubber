@@ -229,6 +229,17 @@ live: needles follow speed and revs, the gear steps with speed, the lap
 and fuel count down, warning lamps light for braking, rain and low fuel,
 and the formula wheel's shift lights fill with the revs and show DRS.
 
+**Surfaces.** `src/three/effects.js` puts what the cars leave on the road
+and throw up behind them into two draw calls. Tyre marks are quads laid
+from each rear wheel's contact point into a ring-buffered mesh: rally cars
+and trophy trucks rut shallow tracks the whole way and deeper ones under
+braking, heavy cornering or a slide (darker when wet); tarmac classes only
+leave black rubber from a locked-up braking stab. Particles are point
+sprites with a per-particle world size and fade: dust plumes on dry dirt
+and sand, mud or wet sand clods on a ballistic arc when wet, the odd fleck
+of gravel off the stock car's oval, a wisp of tyre smoke off a lock-up on
+tarmac. Big fields throw up less each so the cloud stays within budget.
+
 Cars don't pass through each other: each carries a collision footprint and a
 separation pass keeps the field apart. It works in track space (offset along
 the track vs. across it) rather than 3D, so it stays cheap even with 40 Baja
