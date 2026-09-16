@@ -138,11 +138,24 @@ places to the field until they pit too. The complex (`src/three/pits.js`) is bui
 frames: lane surface with the fast-lane line and box markings, a pit wall
 with a stand on it, a garage per team with its header, sign and kit, and a
 control centre behind each with window bands, a dish and masts. A crew per
-garage — mechanics for every wheel and a chief, rider-mesh figures baked in
-standing, striding and kneeling frames — runs out as the car brakes in,
-kneels on the guns, steps back, waves it away and walks home; the crew
-serves the team's stops in order, so a double-stack hands over without a
-teleport. Your racer's stop is a cutscene: the camera goes to a shot list
+garage is cast by the class — wheel gunners at every hub, tyre carriers
+with the fresh rubber, a fuel man on the stock cars and bikes, and the
+chief on the lollipop — from three rigged figures (`assets/fbx-src/crew/`,
+Mixamo skeletons with a running clip, converted like the cars). They are
+posed on their skeletons at runtime (`src/three/crewRig.js`): a pose is a
+set of directions each bone should point along in the figure's own frame,
+and every bone chases its target at its own rate, with breathing and sway
+on top, so the crew settles into a crouch the way a person does; the run
+clip is layered under it whenever a figure moves. The stop plays out in
+full: out of the garage on the run, down on the guns (the gun walking
+round the five lugs on a stock car, buzzing on a single nut on a formula
+car), the old wheel sliding off and the new one on, the release with both
+arms up, the wave, and the walk back with the old tyre; a fuel man holds
+the can in the tank door; the chief drops the board as the car goes. Each
+crew member wears the number of the car they are serving on a badge on
+the chest (the rigs' atlases split the chest across islands, so it is a
+decal rather than an atlas overlay), and the crew serves the team's stops
+in order, so a double-stack hands over without a teleport. Your racer's stop is a cutscene: the camera goes to a shot list
 (the lane mouth from the wall, a low chase down the lane, the garage's own
 view as the car brakes in, a slow orbit over the box, a wheel close-up
 through the launch, a pan from the wall, the exit) with a stopwatch on the

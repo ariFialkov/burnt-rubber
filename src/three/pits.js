@@ -11,7 +11,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from '../../vendor/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, smoothstep } from '../core/rng.js';
-import { buildCrewFigure, hasCrewFigures } from './models.js';
+import { hasCrewFigures } from './models.js';
+import { CrewRig, wheelGun, fuelCan, tyre, lollipop } from './crewRig.js';
 
 const sstep = (a, b, x) => smoothstep(clamp((x - a) / (b - a), 0, 1));
 
@@ -210,129 +211,163 @@ export function buildPits(track, script, race, rand) {
 }
 
 // --- the crews ----------------------------------------------------------------
-// One crew per garage: a mechanic per wheel plus a chief. Each figure is a
-// stand / stride / kneel flipbook with live arm joints. The scene tells a
-// crew when its team's car is due at the box and where its wheels will be;
-// the crew runs out, kneels and works, steps back, waves it off, and walks
-// home. Times are relative to the car's box arrival (0) and departure (D).
+// One crew per garage, cast by the class: wheel gunners (mechanics) at every
+// hub, tyre carriers (engineers) with the fresh rubber, a fuel man on the
+// stock cars and bikes, and the chief on the lollipop. The scene hands a
+// crew the stop that is due — when the car stops, where its wheels and
+// fuel door will be, which car — and the crew plays it out: out of the
+// garage on the run, down on the guns, the old wheel off and the new one
+// on, the release, the wave, and the walk back. Times are relative to the
+// car's arrival (0) and departure (D).
+
+const RUN = 5.4, WALK = 2.1, STEP = 1.6; // m/s
+const TYRE_R = { formula: 0.34, stock: 0.36, moto: 0.3 };
+
 export class PitCrews {
   constructor(scene, pits, race, wheelCount) {
     this.crews = [];
     this.ok = hasCrewFigures();
     if (!this.ok) return;
     this.pits = pits;
+    this.vehicle = race.tour.vehicle;
+    this.tmp = new THREE.Vector3();
+    // the cast, per garage
+    const cast = [];
+    if (this.vehicle === 'formula') { for (let k = 0; k < 4; k++) cast.push({ kind: 'gun', role: 'mechanic', wheels: [k] }); for (let k = 0; k < 4; k++) cast.push({ kind: 'carry', role: 'engineer', wheels: [k] }); }
+    else if (this.vehicle === 'stock') { cast.push({ kind: 'gun', role: 'mechanic', wheels: ['RF', 'LF'] }, { kind: 'gun', role: 'mechanic', wheels: ['RR', 'LR'] }, { kind: 'carry', role: 'engineer', wheels: ['RF', 'LF'] }, { kind: 'carry', role: 'engineer', wheels: ['RR', 'LR'] }, { kind: 'fuel', role: 'engineer' }); }
+    else { for (let k = 0; k < Math.min(2, wheelCount); k++) cast.push({ kind: 'gun', role: 'mechanic', wheels: [k] }); cast.push({ kind: 'fuel', role: 'engineer' }); }
+    cast.push({ kind: 'chief', role: 'chief' });
     for (const g of pits.garages) {
       const members = [];
-      const count = wheelCount + 1;
-      for (let k = 0; k < count; k++) {
-        const fig = buildCrewFigure(g.colors);
-        // home spots: a line inside the garage, facing the lane
-        const home = g.center.clone().addScaledVector(g.t, (k - (count - 1) / 2) * 1.1).addScaledVector(g.n, g.front + 3.5 + (k % 2) * 1.2);
-        fig.position.copy(home);
-        fig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), g.n.clone().negate());
-        scene.add(fig);
-        members.push({ fig, home, pose: 'stand', phase: (k * 1.7) % 6.28, isChief: k === count - 1, pos: home.clone(), face: g.n.clone().negate(), faceHome: g.n.clone().negate() });
-      }
+      const first = race.field.find((r) => r.team === g.team);
+      cast.forEach((c, k) => {
+        const rig = new CrewRig(c.role, g.colors, first ? first.number : null);
+        if (!rig.ok) return;
+        // home spots: two rows inside the garage, facing the lane
+        const home = g.center.clone().addScaledVector(g.t, (k - (cast.length - 1) / 2) * 1.05).addScaledVector(g.n, g.front + 3.4 + (k % 2) * 1.3);
+        rig.root.position.copy(home);
+        const faceHome = g.n.clone().negate();
+        rig.root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), faceHome);
+        scene.add(rig.root);
+        // props
+        if (c.kind === 'gun') rig.attach('gun', wheelGun(new THREE.Color(g.colors[0])), 'RightHand', new THREE.Vector3(0, 0.02, 0.04), new THREE.Euler(0, 0, 0), 'RightHand');
+        if (c.kind === 'carry') rig.attach('tyre', tyre(TYRE_R[this.vehicle] || 0.33, this.vehicle === 'moto' ? 0.16 : 0.3), 'Spine2', new THREE.Vector3(0, 0.12, 0.42), new THREE.Euler(Math.PI / 2, 0, 0));
+        if (c.kind === 'fuel') rig.attach('can', fuelCan(new THREE.Color(g.colors[1])), 'LeftHand', new THREE.Vector3(0.04, 0.06, 0.02), new THREE.Euler(0, 0, 0), 'LeftHand');
+        if (c.kind === 'chief') rig.attach('paddle', lollipop(new THREE.Color(g.colors[0])), 'RightHand', new THREE.Vector3(0, 0.02, 0), new THREE.Euler(0, 0, 0), 'RightHand');
+        rig.showProp('tyre', c.kind === 'carry'); rig.showProp('gun', c.kind === 'gun'); rig.showProp('can', c.kind === 'fuel'); rig.showProp('paddle', c.kind === 'chief');
+        rig.setPose(c.kind === 'chief' ? 'watch' : 'stand');
+        members.push({ rig, kind: c.kind, wheels: c.wheels, home, pos: home.clone(), face: faceHome.clone(), faceHome, phase: (k * 1.7) % 6.28, tyreOn: c.kind === 'carry', backed: false });
+      });
       this.crews.push({ garage: g, members, job: null });
     }
-    this.tmp = new THREE.Vector3();
   }
 
-  // job: { tArrive, tLeave, wheels: [Vector3 world], lookAt: [Vector3], chief: Vector3, chiefLook: Vector3, forward: Vector3 } or null
-  setJob(garageIdx, job) { if (this.ok) this.crews[garageIdx].job = job; }
+  // job: see RaceScene.pitJob — { carIdx, number, tArrive, tLeave, wheels:[{hub, ground, out, front, mesh, restX, outSign, tag}], forward, fuel:{p,out}, chief, chiefLook }
+  setJob(garageIdx, job) {
+    if (!this.ok) return;
+    const crew = this.crews[garageIdx];
+    if (crew.job && crew.job !== job) this.restoreWheels(crew.job);
+    crew.job = job;
+    for (const m of crew.members) { m.rig.setNumber(job ? job.number : m.rig.number); m.backed = false; if (m.kind === 'carry') { m.tyreOn = true; m.rig.showProp('tyre', true); } }
+  }
+  restoreWheels(job) { for (const w of job.wheels) if (w.mesh) w.mesh.position.x = w.restX; }
 
-  showPose(m, pose) {
-    if (m.pose === pose) return;
-    m.pose = pose;
-    for (const [name, fig] of Object.entries(m.fig.userData.poses)) fig.visible = name === pose;
-  }
-  arms(m, pose, fn) {
-    const fig = m.fig.userData.poses[pose];
-    if (!fig) return;
-    const L = fig.getObjectByName('arm_l'), R = fig.getObjectByName('arm_r'), FL = fig.getObjectByName('fore_l'), FR = fig.getObjectByName('fore_r');
-    fn(L, R, FL, FR);
-  }
-  face(m, dir) {
-    if (dir.lengthSq() < 1e-6) return;
-    m.face.lerp(dir.clone().setY(0).normalize(), 0.25).normalize();
-    m.fig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), m.face);
+  // The wheel a member is on at this moment (the stock crews do the right
+  // side first, then run round to the left).
+  wheelFor(m, job, a, D) {
+    const list = m.wheels.map((tag) => (typeof tag === 'number' ? job.wheels[tag] : job.wheels.find((w) => w.tag === tag))).filter(Boolean);
+    if (!list.length) return null;
+    if (list.length === 1) return { w: list[0], seg: [0, 1] };
+    const half = a < 0.5 * D;
+    return { w: half ? list[0] : list[1], seg: half ? [0, 0.47] : [0.53, 1] };
   }
 
   update(t, dt) {
     if (!this.ok) return;
     for (const crew of this.crews) {
       const job = crew.job;
-      crew.members.forEach((m, k) => {
-        const fig = m.fig;
-        // What this member wants: where to be, what to do there. Movement
-        // is by speed, not by clock, so a job handed over mid-stop (the
-        // team-mate double-stacking) just sends everyone to the new spots.
-        let want = m.home, act = 'idle', speed = 2.6, faceDir = null;
-        if (job) {
-          const a = t - job.tArrive;              // seconds since the car stopped (negative: on its way)
-          const D = job.tLeave - job.tArrive;
-          const target = m.isChief ? job.chief : job.wheels[k % job.wheels.length];
-          const look = m.isChief ? job.chiefLook : job.lookAt[k % job.lookAt.length];
-          const outward = m.isChief ? job.forward.clone().negate() : target.clone().sub(look).setY(0).normalize();
-          if (a >= -2.6 && a < 0) { want = target; act = 'ready'; speed = 6.5; faceDir = look.clone().sub(target); }
-          else if (a >= 0 && a < D) { want = target; act = m.isChief ? 'paddle' : 'work'; speed = 6.5; faceDir = look.clone().sub(target); }
-          else if (a >= D && a < D + 0.9) { want = target.clone().addScaledVector(outward, 1.4); act = 'back'; speed = 1.8; faceDir = look.clone().sub(want); }
-          else if (a >= D + 0.9 && a < D + 3.4) { want = target.clone().addScaledVector(outward, 1.4); act = 'wave'; speed = 1.8; faceDir = job.forward; }
+      const D = job ? job.tLeave - job.tArrive : 1;
+      const a = job ? t - job.tArrive : -Infinity;
+      for (const m of crew.members) {
+        const rig = m.rig;
+        let want = m.home, face = m.faceHome, pose = m.kind === 'chief' ? 'watch' : 'stand', speed = WALK, work = null;
+        if (job && a >= -3.4 && a < D + 6) {
+          const fwd = job.forward, back = fwd.clone().negate();
+          if (m.kind === 'gun' || m.kind === 'carry') {
+            const wf = this.wheelFor(m, job, a, D);
+            if (wf) {
+              const { w, seg } = wf;
+              const s0 = seg[0] * D, s1 = seg[1] * D;
+              const gunSpot = w.ground.clone().addScaledVector(w.out, 0.8);
+              const carrySpot = w.ground.clone().addScaledVector(w.out, 1.05).addScaledVector(w.front ? fwd : back, 0.95);
+              const toHub = w.hub.clone().sub(gunSpot).setY(0).normalize();
+              if (m.kind === 'gun') {
+                if (a < 0) { want = gunSpot; face = toHub; pose = 'ready'; speed = RUN; }
+                else if (a < s1 && a >= s0) {
+                  want = gunSpot; face = toHub; speed = RUN;
+                  const local = (a - s0) / Math.max(0.01, s1 - s0);
+                  const on = local < 0.34 || local > 0.72;      // loosen, then tighten after the swap
+                  pose = on ? 'gun' : 'gunUp';
+                  if (on) work = { lugs: this.vehicle === 'formula' ? 1 : 5 };
+                } else if (a < D) { want = gunSpot; face = toHub; pose = 'gunUp'; speed = RUN; }
+                else if (a < D + 0.8) { want = gunSpot.clone().addScaledVector(w.out, 0.9); face = toHub; pose = 'release'; speed = STEP; }
+                else if (a < D + 2.6) { want = gunSpot.clone().addScaledVector(w.out, 0.9); face = fwd; pose = 'watch'; speed = STEP; }
+              } else {
+                // the carrier: waits with the fresh tyre, steps in for the swap, carries the old one off
+                const local = (a - s0) / Math.max(0.01, s1 - s0);
+                const swap = a >= s0 && a < s1 && local >= 0.34 && local < 0.72;
+                if (a < s0 || (a >= s0 && a < s1 && local < 0.34)) { want = carrySpot; face = toHub; pose = 'carry'; speed = RUN; }
+                else if (swap) {
+                  const x = (local - 0.34) / 0.38; // 0..1 through the swap
+                  want = w.ground.clone().addScaledVector(w.out, 0.95); face = toHub; pose = 'wheel'; speed = RUN;
+                  // the old wheel out, the new one on: the car's own wheel mesh slides
+                  const slide = x < 0.5 ? sstep(0.05, 0.4, x) : 1 - sstep(0.55, 0.95, x);
+                  if (w.mesh) w.mesh.position.x = w.restX + w.outSign * 0.34 * slide;
+                  const on = x < 0.5; if (m.tyreOn !== on) { m.tyreOn = on; rig.showProp('tyre', on); }
+                } else if (a < D) { want = carrySpot; face = toHub; pose = 'carry'; speed = STEP; if (!m.tyreOn) { m.tyreOn = true; rig.showProp('tyre', true); } }
+                else if (a < D + 2.6) { want = carrySpot.clone().addScaledVector(w.out, 0.8); face = fwd; pose = 'carry'; speed = STEP; }
+              }
+            }
+          } else if (m.kind === 'fuel' && job.fuel) {
+            const spot = job.fuel.p.clone().addScaledVector(job.fuel.out, 0.8);
+            const toDoor = job.fuel.out.clone().negate();
+            if (a < D * 0.92) { want = spot; face = toDoor; pose = a < -0.3 ? 'ready' : 'fuel'; speed = RUN; }
+            else if (a < D + 2.6) { want = spot.clone().addScaledVector(job.fuel.out, 0.9); face = a < D ? toDoor : fwd; pose = a < D ? 'stand' : 'watch'; speed = STEP; }
+          } else if (m.kind === 'chief') {
+            if (a < D) { want = job.chief; face = job.chiefLook.clone().sub(job.chief).setY(0).normalize(); pose = 'chief'; speed = RUN; }
+            else if (a < D + 3.2) { want = job.chief; face = fwd; pose = 'chiefDown'; speed = STEP; }
+          }
         }
-        // move toward the spot at this act's pace
+        // move toward the spot at this act's pace; the run clip fades in with the speed
         const d = this.tmp.copy(want).sub(m.pos).setY(0);
         const dist = d.length();
-        if (dist > 0.04) {
+        let moving = 0;
+        if (dist > 0.03) {
           const stepLen = Math.min(dist, speed * dt);
           m.pos.addScaledVector(d, stepLen / dist);
           m.pos.y = want.y;
-          fig.position.copy(m.pos);
-          this.run(m, t, d, speed > 4 ? 8 : 5);
-          if (act === 'back') { this.showPose(m, Math.floor(t * 6) % 2 ? 'stride' : 'stand'); if (faceDir) this.face(m, faceDir); }
-          return;
+          moving = stepLen / Math.max(dt, 1e-3);
+          this.turn(m, d, dt);
+          if (moving > 1.0) pose = m.kind === 'carry' ? 'carry' : 'stand';
+        } else {
+          m.pos.copy(want);
+          this.turn(m, face, dt);
         }
-        m.pos.copy(want);
-        fig.position.copy(m.pos);
-        if (act === 'idle') { this.idle(m, t); return; }
-        if (faceDir) this.face(m, faceDir);
-        if (act === 'ready' || act === 'back') { this.showPose(m, 'stand'); this.armsHang(m, 'stand', t); return; }
-        if (act === 'paddle') {
-          this.showPose(m, 'stand');
-          this.arms(m, 'stand', (L, R, FL, FR) => { if (R) R.rotation.set(-2.9, 0, 0); if (FR) FR.rotation.set(-0.2, 0, 0); if (L) L.rotation.set(0.1, 0, 0); if (FL) FL.rotation.set(-0.3, 0, 0); });
-          return;
-        }
-        if (act === 'work') {
-          // kneeling at the wheel, arms pumping on the gun
-          this.showPose(m, 'kneel');
-          const w = Math.sin(t * 31 + m.phase);
-          this.arms(m, 'kneel', (L, R, FL, FR) => { if (R) R.rotation.set(-1.0 + 0.25 * w, 0, 0); if (FR) FR.rotation.set(-0.9 - 0.35 * w, 0, 0); if (L) L.rotation.set(-0.9 - 0.2 * w, 0, 0); if (FL) FL.rotation.set(-1.0 + 0.3 * w, 0, 0); });
-          fig.position.y = want.y + 0.02 * Math.abs(w);
-          return;
-        }
-        if (act === 'wave') {
-          this.showPose(m, 'stand');
-          const w = Math.sin(t * 9 + m.phase);
-          this.arms(m, 'stand', (L, R, FL, FR) => { if (R) R.rotation.set(-2.7, 0, 0.3); if (FR) FR.rotation.set(-0.5 + 0.35 * w, 0, 0.35 * w); if (L) L.rotation.set(0.15, 0, 0); if (FL) FL.rotation.set(-0.3, 0, 0); });
-        }
-      });
-      if (job && t > job.tLeave + 6.5) crew.job = null;
+        rig.root.position.copy(m.pos);
+        rig.setPose(pose);
+        rig.work = work;
+        rig.noise = work ? 0.3 : 1;
+        rig.update(dt, t + m.phase, moving);
+      }
+      if (job && t > job.tLeave + 6.5) { this.restoreWheels(job); crew.job = null; }
     }
   }
-  idle(m, t) {
-    m.fig.position.copy(m.pos);
-    this.showPose(m, 'stand');
-    this.face(m, m.faceHome);
-    this.armsHang(m, 'stand', t, 0.06);
-  }
-  armsHang(m, pose, t, amp = 0.04) {
-    const w = Math.sin(t * 1.3 + m.phase) * amp;
-    this.arms(m, pose, (L, R, FL, FR) => { if (L) L.rotation.set(w, 0, 0); if (R) R.rotation.set(-w, 0, 0); if (FL) FL.rotation.set(-0.15, 0, 0); if (FR) FR.rotation.set(-0.15, 0, 0); });
-  }
-  run(m, t, dir, hz = 8) {
-    this.face(m, dir);
-    this.showPose(m, Math.floor(t * hz) % 2 ? 'stride' : 'stand');
-    const w = Math.sin(t * hz * Math.PI);
-    m.fig.position.y = m.pos.y + 0.05 * Math.abs(w);
-    for (const pose of ['stand', 'stride']) this.arms(m, pose, (L, R, FL, FR) => { if (L) L.rotation.set(0.8 * w, 0, 0); if (R) R.rotation.set(-0.8 * w, 0, 0); if (FL) FL.rotation.set(-1.2, 0, 0); if (FR) FR.rotation.set(-1.2, 0, 0); });
+
+  // Ease the facing round toward a direction.
+  turn(m, dir, dt) {
+    if (dir.lengthSq() < 1e-6) return;
+    const target = dir.clone().setY(0).normalize();
+    m.face.lerp(target, 1 - Math.exp(-7 * dt)).normalize();
+    m.rig.root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), m.face);
   }
 }

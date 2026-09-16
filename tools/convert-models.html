@@ -404,20 +404,6 @@
         lean: 0.15, head: 0.05, thigh: 1.45, shin: 0.9, splay: 0.03,
         upper: 1.3, out: 0.12, fore: 0.3, yaw: 0.05,
       },
-      // Pit crew, three frames: standing, mid-stride (legs split), and down
-      // on one knee. Leg angles may differ per side ({l, r}).
-      crew: {
-        lean: 0.0, head: 0.0, thigh: 0.0, shin: 0.0, splay: 0.0,
-        upper: 0.12, out: 0.1, fore: 0.35, yaw: 0.0,
-      },
-      stride: {
-        lean: 0.12, head: 0.0, thigh: { l: 0.7, r: -0.55 }, shin: { l: 0.25, r: 1.0 }, splay: 0.0,
-        upper: { l: -0.6, r: 0.6 }, out: 0.1, fore: 0.9, yaw: 0.0,
-      },
-      kneel: {
-        lean: 0.2, head: -0.15, thigh: { l: 1.5, r: 0.05 }, shin: { l: 1.5, r: 1.55 }, splay: 0.05,
-        upper: 0.9, out: 0.15, fore: 1.0, yaw: 0.1,
-      },
     };
     const perSide = (v, side) => (typeof v === 'number' ? v : side > 0 ? v.l : v.r);
     const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -594,6 +580,90 @@
     let bin = '';
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
     out[figure] = btoa(bin);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pit crew: three rigged figures (mechanic, engineer, chief) with a Mixamo
+  // skeleton and a running clip. Kept skinned: the runtime poses the bones
+  // itself. Normalised to a standing height, feet on the ground, facing +Z.
+  // ---------------------------------------------------------------------------
+  const crewLib = await import('../src/three/models.js');
+  for (const role of ['mechanic', 'engineer', 'chief']) {
+    const manager = new THREE.LoadingManager();
+    const allIn = new Promise((res) => { manager.onLoad = res; });
+    const loaded = await new FBXLoader(manager).loadAsync(`../assets/fbx-src/crew/${role}.fbx`);
+    await allIn;
+    const [base, normal, rough, metal] = await Promise.all(['basecolor', 'normal', 'roughness', 'metallic'].map((k) => loadImage(`../assets/fbx-src/crew/${role}_${k}.png`)));
+    tex[role] = { base: bake(base, 512, 0.88), normal: bake(normal, 512, 0.9), rm: packRM(rough, metal, 256) }; // low-poly figures seen at a distance; the number is a decal
+    // the stray marker sphere goes; the skinned body and its skeleton stay
+    const strays = [];
+    loaded.traverse((o) => { if (o.isMesh && !o.isSkinnedMesh) strays.push(o); });
+    strays.forEach((o) => o.parent.remove(o));
+    let skin = null;
+    loaded.traverse((o) => { if (o.isSkinnedMesh) skin = o; });
+    skin.name = 'body';
+    skin.frustumCulled = false;
+    skin.geometry.computeVertexNormals();
+    for (const name of Object.keys(skin.geometry.attributes)) if (!['position', 'normal', 'uv', 'skinIndex', 'skinWeight'].includes(name)) skin.geometry.deleteAttribute(name);
+    skin.geometry = BGU.mergeVertices(skin.geometry, 1e-4);
+    // Every triangle has its own atlas island, so nothing welds: the mesh is
+    // flat-shaded by nature, and the loader recomputes exactly those normals
+    skin.geometry.deleteAttribute('normal');
+    const root = new THREE.Group();
+    root.name = role;
+    root.add(loaded);
+    root.updateWorldMatrix(true, true);
+    // facing: the rig carries a head-front marker bone; the bind pose is a
+    // mid-stride frame, so the feet are no guide
+    const bone = (n) => { let b = null; root.traverse((o) => { if (o.isBone && o.name === n) b = o; }); return b; };
+    const wp = (b) => b.getWorldPosition(new THREE.Vector3());
+    const fwd = wp(bone('headfront')).sub(wp(bone('mixamorigHead'))).setY(0).normalize();
+    root.rotation.y = Math.atan2(fwd.x, fwd.z) * -1;
+    root.updateWorldMatrix(true, true);
+    // size from the skinned body in its bind pose (the mesh is stored posed)
+    skin.geometry.computeBoundingBox();
+    const bb = skin.geometry.boundingBox.clone().applyMatrix4(skin.matrixWorld);
+    const size = bb.getSize(new THREE.Vector3());
+    const H = 1.78, sc = H / size.y;
+    root.scale.setScalar(sc);
+    root.updateWorldMatrix(true, true);
+    const bb2 = skin.geometry.boundingBox.clone().applyMatrix4(skin.matrixWorld);
+    root.position.set(-(bb2.min.x + bb2.max.x) / 2, -bb2.min.y, -(bb2.min.z + bb2.max.z) / 2);
+    root.updateWorldMatrix(true, true);
+    // the running clip, trimmed of the stub, named for the runtime
+    const run = loaded.animations.find((a) => /Running$/.test(a.name)) || loaded.animations[0];
+    run.name = 'run';
+    const bones = []; root.traverse((o) => { if (o.isBone) bones.push(o.name); });
+    root.userData = { vehicle: role, length: +size.z.toFixed(3) * sc, width: +(size.x * sc).toFixed(3), height: H, wheelRadius: 0, wheels: 0, hasUV: !!skin.geometry.attributes.uv, rig: 'mixamo', bones: bones.length, tris: skin.geometry.attributes.position.count / 3 };
+    meta[role] = { ...root.userData };
+    // previews: a team recolour, standing, and a frame of the run
+    window.__BR_LIVERIES__ = { ...(window.__BR_LIVERIES__ || {}), [role]: tex[role] };
+    await crewLib.loadLiveries();
+    const m = crewLib.liveryMaterial(role, ['#2ecc40', '#ffd12a', '#f2f2f2']);
+    if (m) skin.material = m;
+    if (window.__prev) scene.remove(window.__prev);
+    scene.add(root); window.__prev = root;
+    shots[role] = {};
+    const L = 2.2;
+    const views = { threeq: [L * 1.1, L * 0.7, L * 1.3], side: [L * 1.9, L * 0.45, 0], front: [0, L * 0.5, L * 2.0], rear: [0, L * 0.6, -L * 1.9] };
+    for (const [k, p] of Object.entries(views)) {
+      cam.position.set(...p); cam.lookAt(0, 0.9, 0); cam.updateProjectionMatrix();
+      renderer.render(scene, cam);
+      shots[role][k] = renderer.domElement.toDataURL('image/png');
+    }
+    // export in the bind pose, before the clip touches the bones
+    skin.material = PALETTE.primary;
+    const glb = await new GLTFExporter().parseAsync(root, { binary: true, animations: [run] });
+    const bytes = new Uint8Array(glb);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    out[role] = btoa(bin);
+    { // mid-stride preview
+      skin.material = m || PALETTE.primary;
+      const mixer = new THREE.AnimationMixer(root); const act = mixer.clipAction(run); act.play(); mixer.update(run.duration * 0.3);
+      cam.position.set(...views.threeq); cam.lookAt(0, 0.9, 0); cam.updateProjectionMatrix();
+      renderer.render(scene, cam); shots[role].run = renderer.domElement.toDataURL('image/png');
     }
   }
 

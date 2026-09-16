@@ -861,20 +861,30 @@ export class RaceScene {
     }
   }
 
-  // Where a car's wheels will be when it stops in its box, and where its
-  // crew should stand: a mechanic outboard of each wheel, the chief ahead.
+  // The stop as the crew needs it: when the car arrives and leaves, where
+  // each wheel hub will be (and which mesh to slide for the swap), the fuel
+  // door, and the chief's mark ahead of the nose.
   pitJob(i, ps) {
     const car = this.cars[i];
     const C = this.pits.carAt(ps.boxF, ps.boxF);
-    const left = new THREE.Vector3(-C.t.z, 0, C.t.x); // the car's +X in the world
-    const wheels = [], lookAt = [], spots = [];
+    const fwd = C.t.clone();
+    const leftDir = new THREE.Vector3(C.t.z, 0, -C.t.x); // the car's +X (its left) in the world
+    const wheels = [];
+    let maxX = 0, rearZ = 0;
     for (const w of car.wheels) {
-      const world = C.p.clone().addScaledVector(C.t, w.position.z).addScaledVector(left, w.position.x);
-      lookAt.push(world);
-      spots.push(world.clone().addScaledVector(left, Math.sign(w.position.x || 1) * 0.95).setY(C.p.y));
+      const sx = Math.sign(w.position.x || 1);
+      const hub = C.p.clone().addScaledVector(fwd, w.position.z).addScaledVector(leftDir, w.position.x); hub.y = C.p.y + w.position.y;
+      const ground = hub.clone(); ground.y = C.p.y;
+      maxX = Math.max(maxX, Math.abs(w.position.x)); rearZ = Math.min(rearZ, w.position.z);
+      wheels.push({ hub, ground, out: leftDir.clone().multiplyScalar(sx), outSign: sx, front: !!w.userData.front, mesh: w, restX: w.userData.restX ?? (w.userData.restX = w.position.x), tag: `${sx > 0 ? 'L' : 'R'}${w.userData.front ? 'F' : 'R'}` });
     }
-    const chief = C.p.clone().addScaledVector(C.t, car.length / 2 + 1.9).addScaledVector(left, -this.pits.side * 0.9).setY(C.p.y);
-    return { carIdx: i, tArrive: ps.tBox, tLeave: ps.tLeave, wheels: spots, lookAt, chief, chiefLook: C.p.clone(), forward: C.t.clone() };
+    const vehicle = this.race.tour.vehicle;
+    let fuel = null;
+    if (vehicle === 'stock') fuel = { p: C.p.clone().addScaledVector(fwd, rearZ + 0.7).addScaledVector(leftDir, maxX + 0.15), out: leftDir.clone() };
+    if (vehicle === 'moto') fuel = { p: C.p.clone().addScaledVector(fwd, 0.15).addScaledVector(leftDir, 0.3), out: leftDir.clone() };
+    const chief = C.p.clone().addScaledVector(fwd, car.length / 2 + 2.0).addScaledVector(C.n, -0.9);
+    const r = this.race.field[i];
+    return { carIdx: i, number: r ? r.number : null, tArrive: ps.tBox, tLeave: ps.tLeave, wheels, forward: fwd, left: leftDir, fuel, chief, chiefLook: C.p.clone() };
   }
 
   // Point sprites need the viewport to size themselves in metres.

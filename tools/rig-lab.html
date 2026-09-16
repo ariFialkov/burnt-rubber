@@ -1,0 +1,11 @@
+<!doctype html>
+<!--
+  Rig lab: a blank page with the game's import map, for headless harnesses
+  that load a rigged figure and pose or render it outside the app. Paths
+  resolve from the repo root, like the app's own.
+-->
+<meta charset="utf-8">
+<base href="/">
+<canvas id="c" width="900" height="600"></canvas>
+<script type="importmap">{ "imports": { "three": "/vendor/three.module.js" } }</script>
+<script type="module">window.__ready = true;</script>

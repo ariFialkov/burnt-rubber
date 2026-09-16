@@ -39,6 +39,28 @@ export const NUMBER_RECTS = {
   ],
 };
 
+// The pit crew's shirt number is a badge decal on the chest (their atlases
+// split the chest across islands, so no rectangle covers the baked
+// number): a plate in the polo's own black with the driver's digits.
+export function crewBadge(number, w = 256, h = 176) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.fillStyle = '#131518'; g.fillRect(0, 0, w, h);
+  const grad = g.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, 'rgba(255,255,255,0.06)'); grad.addColorStop(1, 'rgba(0,0,0,0.10)');
+  g.fillStyle = grad; g.fillRect(0, 0, w, h);
+  const text = String(number ?? '');
+  const size = Math.min(h * 0.78, (w * 0.92) / Math.max(1, text.length * 0.66));
+  g.font = `900 italic ${size}px "Arial Black", Impact, "Helvetica Neue", Arial, sans-serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = '#f2f2f2'; g.fillText(text, w / 2, h / 2 + size * 0.05);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
 const px = (n) => n / 1024;
 // Rect as a UV vec4 (u0, v0, u1, v1); the atlas is flipped, so v = 1 - y/1024.
 export function rectUV(r) { return new THREE.Vector4(px(r[0]), 1 - px(r[3]), px(r[2]), 1 - px(r[1])); }
@@ -46,8 +68,9 @@ export function rectUV(r) { return new THREE.Vector4(px(r[0]), 1 - px(r[3]), px(
 const lum = (hex) => { const c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; };
 
 // Colours for a plate given the team palette [primary, secondary, base].
-function plateColors(style, colors) {
+function plateColors(style, colors, spec) {
   const [primary, , base] = colors;
+  if (style === 'atlas') return { plate: spec.plateHex, ink: spec.inkHex || '#f4f4f4', edge: null }; // the atlas's own paint, recoloured with it
   if (style === 'dark') return { plate: '#101214', ink: '#f4f4f4', edge: null };
   if (style === 'accent') return { plate: primary, ink: lum(primary) > 0.5 ? '#111' : '#fff', edge: null };
   // light: the base colour when it is light, else white — always dark digits
@@ -57,7 +80,7 @@ function plateColors(style, colors) {
 
 // Draw one plate tile: fill, then the number turned to match the baked glyph.
 function drawTile(g, x, y, w, h, spec, number, colors) {
-  const { plate, ink, edge } = plateColors(spec.plate, colors);
+  const { plate, ink, edge } = plateColors(spec.plate, colors, spec);
   g.save();
   g.beginPath(); g.rect(x, y, w, h); g.clip();
   g.fillStyle = plate; g.fillRect(x, y, w, h);
@@ -99,7 +122,7 @@ export function numberOverlay(vehicle, number, colors) {
   tex.minFilter = THREE.LinearFilter;
   tex.anisotropy = 4;
   const rects = [0, 1, 2, 3].map((k) => (specs[k] ? rectUV(specs[k].rect) : new THREE.Vector4(-1, -1, -1, -1)));
-  return { texture: tex, rects, count: specs.length };
+  return { texture: tex, rects, count: specs.length, pre: specs.some((q) => q.plate === 'atlas') };
 }
 
 // A decal texture: transparent, the number in the palette's contrast ink.

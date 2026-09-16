@@ -20,12 +20,14 @@ export const MODEL_FILES = {
   moto: 'assets/models/moto.glb',
   rider: 'assets/models/rider.glb', // seated on every bike
   driver: 'assets/models/driver.glb', // the same figure, seated in every car
-  crew: 'assets/models/crew.glb',     // pit crew: standing...
-  stride: 'assets/models/stride.glb', // ...mid-stride...
-  kneel: 'assets/models/kneel.glb',   // ...and down on one knee at a wheel
+  mechanic: 'assets/models/mechanic.glb', // pit crew: rigged figures (Mixamo skeleton, a running clip)
+  engineer: 'assets/models/engineer.glb',
+  chief: 'assets/models/chief.glb',
 };
+export const CREW_ROLES = ['mechanic', 'engineer', 'chief'];
 
 const templates = new Map(); // vehicle -> { meta, parts: {role: geometry}, wheels: [{geometry, position, radius}] }
+const rigs = new Map();      // role -> { scene, clips, meta } for the skinned crew figures
 const liveries = new Map();  // vehicle -> { texture, accents: [hue, hue] }
 let envMap = null;
 
@@ -34,7 +36,7 @@ let envMap = null;
 // remapping the template's accent hues in the shader, so the painted shapes,
 // numbers and shading stay and only the colours change.
 export const LIVERY_DIR = 'assets/liveries/';
-export const LIVERY_VEHICLES = ['formula', 'stock', 'rally', 'baja', 'moto', 'rider'];
+export const LIVERY_VEHICLES = ['formula', 'stock', 'rally', 'baja', 'moto', 'rider', 'mechanic', 'engineer', 'chief'];
 
 // Shared, look-alike materials: one each for the whole field.
 const SHARED = {
@@ -88,6 +90,16 @@ function b64ToBuffer(b64) {
 }
 
 function ingest(vehicle, gltf) {
+  let skin = null, rigMeta = null;
+  gltf.scene.traverse((o) => { if (o.isSkinnedMesh) skin = o; if (o.userData && o.userData.vehicle) rigMeta = o.userData; });
+  if (skin) {
+    // A rigged figure: kept whole (skeleton and clips) and cloned per use;
+    // the template entry carries what the livery machinery needs.
+    skin.frustumCulled = false;
+    rigs.set(vehicle, { scene: gltf.scene, clips: gltf.animations || [], meta: rigMeta });
+    templates.set(vehicle, { meta: rigMeta, parts: { body: skin.geometry }, pivots: {}, parents: {}, wheels: [] });
+    return;
+  }
   const parts = {};
   const pivots = {}; // parts built around a hinge (the bike's stand, the driver's joints) sit at it
   const parents = {}; // a part nested under another (a forearm on its upper arm)
@@ -263,6 +275,7 @@ export function liveryMaterial(vehicle, colors, number = null) {
   if (!l) return null;
   if (!l.accents) refreshAccents(vehicle);
   const overlay = number != null ? numberOverlay(vehicle, number, colors) : null;
+  const pre = overlay?.pre ? 1 : 0; // plates painted in the atlas's own colours go on before the recolour, so they follow it
   const m = new THREE.MeshStandardMaterial({
     map: l.base,
     normalMap: l.normal || null, normalScale: new THREE.Vector2(0.8, 0.8),
@@ -278,17 +291,11 @@ export function liveryMaterial(vehicle, colors, number = null) {
     uNumMap: { value: overlay ? overlay.texture : null },
     uRects: { value: overlay ? overlay.rects : [0, 1, 2, 3].map(() => new THREE.Vector4(-1, -1, -1, -1)) },
     uRectN: { value: overlay ? overlay.count : 0 },
+    uNumPre: { value: pre },
   };
-  m.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, u);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform float uPrimHue, uSecHue, uBaseOn, uRectN; uniform vec3 uPrim, uSec, uBase; uniform sampler2D uNumMap; uniform vec4 uRects[4];${RECOLOR}`)
-      .replace('#include <map_fragment>', `#include <map_fragment>
-        float br_atlasV = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b);
-        diffuseColor.rgb = br_recolor(diffuseColor.rgb, uPrimHue, uPrim);
-        diffuseColor.rgb = br_recolor(diffuseColor.rgb, uSecHue, uSec);
-        diffuseColor.rgb = br_rebase(diffuseColor.rgb, uBase, uBaseOn);
-        for (int k = 0; k < 4; k++) {
+  m.userData.livery = { vehicle, colors, uniforms: u };
+  const PLATES = (when) => `
+        if (uNumPre ${when} 0.5) for (int k = 0; k < 4; k++) {
           if (float(k) >= uRectN) break;
           vec4 rc = uRects[k];
           if (vMapUv.x >= rc.x && vMapUv.x <= rc.z && vMapUv.y >= rc.y && vMapUv.y <= rc.w) {
@@ -296,9 +303,18 @@ export function liveryMaterial(vehicle, colors, number = null) {
             vec4 n = texture2D(uNumMap, vec2(l.x, (float(k) + l.y) / 4.0));
             diffuseColor.rgb = mix(diffuseColor.rgb, n.rgb, n.a); // a clean plate: the baked digits must not ghost through
           }
-        }`);
+        }`;
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, u);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform float uPrimHue, uSecHue, uBaseOn, uRectN, uNumPre; uniform vec3 uPrim, uSec, uBase; uniform sampler2D uNumMap; uniform vec4 uRects[4];${RECOLOR}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        float br_atlasV = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b);${PLATES('>')}
+        diffuseColor.rgb = br_recolor(diffuseColor.rgb, uPrimHue, uPrim);
+        diffuseColor.rgb = br_recolor(diffuseColor.rgb, uSecHue, uSec);
+        diffuseColor.rgb = br_rebase(diffuseColor.rgb, uBase, uBaseOn);${PLATES('<')}`);
   };
-  m.customProgramCacheKey = () => 'br-livery-v2'; // one program for the whole field
+  m.customProgramCacheKey = () => 'br-livery-v3'; // one program for the whole field
   return m;
 }
 
@@ -369,31 +385,58 @@ function buildFigure(t, mat, name) {
   return root;
 }
 
-// A pit crew member in the team's colours: the three poses stacked in one
-// group (only one shown at a time), each with its feet (or knee) on y = 0,
-// and their arm joints reachable by name. Height in metres.
-export function buildCrewFigure(colors, height = 1.72) {
+// Repaint a livery material's number plates (a crew member switching to the
+// team-mate's car): a fresh overlay tile, same rectangles.
+export function setLiveryNumber(material, number) {
+  const l = material?.userData?.livery;
+  if (!l) return;
+  const overlay = numberOverlay(l.vehicle, number, l.colors);
+  if (!overlay) return;
+  const old = l.uniforms.uNumMap.value;
+  l.uniforms.uNumMap.value = overlay.texture;
+  l.uniforms.uRects.value = overlay.rects;
+  l.uniforms.uRectN.value = overlay.count;
+  if (old && old !== overlay.texture) old.dispose();
+}
+
+// Clone a rigged figure so each copy has its own skeleton (a plain clone
+// would share the source's bones), keeping the bind matrices.
+function cloneSkinned(source) {
+  const clone = source.clone(true);
+  const srcSkins = [], dstSkins = [];
+  source.traverse((o) => { if (o.isSkinnedMesh) srcSkins.push(o); });
+  clone.traverse((o) => { if (o.isSkinnedMesh) dstSkins.push(o); });
+  const bonesByName = new Map();
+  clone.traverse((o) => { if (o.isBone) bonesByName.set(o.name, o); });
+  dstSkins.forEach((dst, k) => {
+    const src = srcSkins[k];
+    const bones = src.skeleton.bones.map((b) => bonesByName.get(b.name));
+    dst.bind(new THREE.Skeleton(bones, src.skeleton.boneInverses.map((m) => m.clone())), src.bindMatrix.clone());
+  });
+  return clone;
+}
+
+// A pit crew member: a rigged figure in the team's colours wearing the
+// number of the car it serves. Returns the root with its bones by short
+// name (Hips, Spine, LeftArm, ...), the skinned body, and the run clip.
+export function buildCrewFigure(role, colors, number = null) {
+  const rig = rigs.get(role);
+  if (!rig) return null;
   const root = new THREE.Group();
   root.name = 'crew';
-  const mat = hasLivery('rider') ? liveryMaterial('rider', colors) : new THREE.MeshStandardMaterial({ color: colors[1], metalness: 0.1, roughness: 0.7, envMap });
-  const poses = {};
-  for (const pose of ['crew', 'stride', 'kneel']) {
-    const t = templates.get(pose);
-    if (!t) continue;
-    const fig = buildFigure(t, mat, pose === 'crew' ? 'stand' : pose);
-    fig.scale.setScalar(height);
-    // lowest point of the posed body: stand it on the ground
-    let minY = 0;
-    for (const g of Object.values(t.parts)) { if (!g.boundingBox) g.computeBoundingBox(); minY = Math.min(minY, g.boundingBox.min.y); }
-    fig.position.y = -minY * height;
-    fig.visible = pose === 'crew';
-    poses[fig.name] = fig;
-    root.add(fig);
-  }
-  root.userData.poses = poses;
+  const fig = cloneSkinned(rig.scene);
+  root.add(fig);
+  let body = null;
+  fig.traverse((o) => { if (o.isSkinnedMesh) body = o; });
+  const mat = hasLivery(role) ? liveryMaterial(role, colors, number) : new THREE.MeshStandardMaterial({ color: colors[0], metalness: 0.05, roughness: 0.8, envMap });
+  body.material = mat;
+  body.castShadow = false;
+  const bones = {};
+  fig.traverse((o) => { if (o.isBone) bones[o.name.replace(/^mixamorig/, '')] = o; });
+  root.userData = { role, body, bones, clips: rig.clips, meta: rig.meta };
   return root;
 }
-export const hasCrewFigures = () => templates.has('crew') && templates.has('stride') && templates.has('kneel');
+export const hasCrewFigures = () => CREW_ROLES.every((r) => rigs.has(r));
 
 // Seat the driver so the head lands on the driver camera's eye point.
 export const DRIVER_HEIGHT = 1.72;

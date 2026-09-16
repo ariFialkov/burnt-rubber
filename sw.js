@@ -2,7 +2,7 @@
 // the freshly deployed build, offline the cached copy plays fully (the whole
 // game is static and deterministic — races run off the world clock).
 
-const CACHE = 'burnt-rubber-v19';
+const CACHE = 'burnt-rubber-v20';
 const ASSETS = [
   '.',
   'index.html',
@@ -52,9 +52,9 @@ const ASSETS = [
   'assets/models/moto.glb',
   'assets/models/rider.glb',
   'assets/models/driver.glb',
-  'assets/models/crew.glb',
-  'assets/models/stride.glb',
-  'assets/models/kneel.glb',
+  'assets/models/mechanic.glb',
+  'assets/models/engineer.glb',
+  'assets/models/chief.glb',
   'assets/liveries/index.json',
   'assets/liveries/formula.jpg',
   'assets/liveries/formula_normal.jpg',
@@ -65,6 +65,15 @@ const ASSETS = [
   'assets/liveries/rally.jpg',
   'assets/liveries/rally_normal.jpg',
   'assets/liveries/rally_rm.jpg',
+  'assets/liveries/mechanic.jpg',
+  'assets/liveries/mechanic_normal.jpg',
+  'assets/liveries/mechanic_rm.jpg',
+  'assets/liveries/engineer.jpg',
+  'assets/liveries/engineer_normal.jpg',
+  'assets/liveries/engineer_rm.jpg',
+  'assets/liveries/chief.jpg',
+  'assets/liveries/chief_normal.jpg',
+  'assets/liveries/chief_rm.jpg',
   'assets/liveries/baja.jpg',
   'assets/liveries/baja_normal.jpg',
   'assets/liveries/baja_rm.jpg',
