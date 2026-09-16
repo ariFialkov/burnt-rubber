@@ -113,9 +113,9 @@ stock cars wind up slowly to a high speed, rally cars and bikes sit in the
 middle (bikes launch hard), trophy trucks lumber. The base race distance is
 wherever the pace car gets to in 40 seconds, so the lap length follows from
 the profile; each tour then scales that distance (`distScale` in
-`src/data/tours.js` — an extra lap on the loops, a quarter more stage on
-rally and baja) and the leader's time follows from the distance, about 48
-to 52 seconds. The race window is sized so a 40-truck field's tail is home
+`src/data/tours.js`: the formula tour runs a 1.3 km grand-prix layout,
+the stock cars a 1.1 km oval, a quarter more stage on rally and baja) and
+the leader's time follows from the distance, about 48 to 55 seconds. The race window is sized so a 40-truck field's tail is home
 before the results. Gaps are kept in seconds but drawn in metres: on
 the grid a second is one row pitch, at cruise it is a cruise-speed's worth of
 road, so the whole field launches together from its real slots and stretches
@@ -232,6 +232,13 @@ model pipeline and swings open on hydraulics above 90% of cruise speed
 live: needles follow speed and revs, the gear steps with speed, the lap
 and fuel count down, warning lamps light for braking, rain and low fuel,
 and the formula wheel's shift lights fill with the revs and show DRS.
+
+**Circuits.** The formula layout is a grand-prix style ring: twenty-odd
+control points at uneven angles with big radius swings for sweepers and
+esses, a few pulled hard inward for hairpins and an esses complex, all
+radial so the lap never crosses itself, then relaxed until no corner is
+tighter than the road can take. Start and finish strips are laid on the
+road surface itself, so they sit flush on crests, dips and banking.
 
 **Stages.** Rally and Baja are point-to-point, not loops: the start and
 the flying finish are kilometres apart, with a grid straight before the

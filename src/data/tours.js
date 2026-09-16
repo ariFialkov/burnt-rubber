@@ -7,9 +7,9 @@ export const TOURS = [
     name: 'Nebula 1',
     tag: 'N1',
     vehicle: 'formula',
-    distScale: 4 / 3, // race distance vs the 40-second base: one more lap, same lap length
+    distScale: 1.4, // race distance vs the 40-second base (loops keep or set their lap length via laps)
     fieldSize: 10,
-    laps: 4,
+    laps: 3,
     accent: '#ff2d55',
     style: 'circuit',
     blurb: 'Open-wheel apex hunters. Ten cars, zero margin.',
@@ -31,9 +31,9 @@ export const TOURS = [
     name: 'FASTCAR',
     tag: 'FC',
     vehicle: 'stock',
-    distScale: 5 / 4,
+    distScale: 1.35,
     fieldSize: 18,
-    laps: 5,
+    laps: 3,
     accent: '#ffd12a',
     style: 'oval',
     blurb: 'Heavy metal at 200 mph. Eighteen wide into turn one.',

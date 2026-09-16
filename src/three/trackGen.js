@@ -38,8 +38,39 @@ const WALK = {
 const ZONE_LEN = { rally: [350, 650], baja: [300, 520] };
 const R_MIN = { rally: 16, baja: 30 };
 
-function controlPoints(style, rand) {
+function controlPoints(style, rand, vehicle) {
   const pts = [];
+  if (vehicle === 'formula') {
+    // A grand-prix layout: many points at uneven angles around a stretched
+    // ring, big radius swings for esses and sweepers, and a few pulled hard
+    // inward for hairpins and chicane complexes. Radial, so it never crosses.
+    const nPts = 18 + Math.floor(rand() * 6);
+    const base = 220, noise = 0.7;
+    const stretch = 1.15 + rand() * 0.55;
+    const angles = [];
+    for (let k = 0; k < nPts; k++) angles.push((k + (rand() - 0.5) * 0.6) / nPts * Math.PI * 2);
+    for (const a of angles) {
+      const r = base * (1 - noise / 2 + rand() * noise);
+      pts.push(new THREE.Vector3(Math.cos(a) * r * stretch, 0, Math.sin(a) * r));
+    }
+    // hairpins / chicanes: pulled well inside, never two next to each other
+    const pulls = 2 + Math.floor(rand() * 2);
+    const used = new Set([0, nPts - 1]);
+    for (let n = 0; n < pulls; n++) {
+      let k = 0;
+      for (let tries = 0; tries < 20; tries++) { k = 1 + Math.floor(rand() * (nPts - 2)); if (!used.has(k) && !used.has(k - 1) && !used.has(k + 1)) break; }
+      used.add(k);
+      pts[k].multiplyScalar(0.45 + rand() * 0.2);
+    }
+    // an esses complex: three neighbours pushed in, out, in
+    for (let tries = 0; tries < 20; tries++) {
+      const k = 2 + Math.floor(rand() * (nPts - 5));
+      if ([k - 1, k, k + 1, k + 2, k + 3].some((j) => used.has(j))) continue;
+      pts[k].multiplyScalar(0.8); pts[k + 1].multiplyScalar(1.12); pts[k + 2].multiplyScalar(0.8);
+      break;
+    }
+    return pts;
+  }
   if (style === 'oval') {
     const rx = 230 + rand() * 60, rz = 120 + rand() * 40;
     for (let k = 0; k < 8; k++) {
@@ -65,17 +96,35 @@ function controlPoints(style, rand) {
   return pts;
 }
 
-// Tightest turning radius along the curve (m), sampled.
+// Tightest turning radius along the curve (m), sampled, and where it is.
 function minRadius(curve, len, closed = true) {
   const N = 600;
-  let prev = curve.getTangentAt(0), r = Infinity;
+  let prev = curve.getTangentAt(0), r = Infinity, u = 0;
   for (let k = 1; k <= (closed ? N : N - 1); k++) {
-    const t = curve.getTangentAt(closed ? (k % N) / N : k / (N - 1));
+    const uu = closed ? (k % N) / N : k / (N - 1);
+    const t = curve.getTangentAt(uu);
     const ang = prev.angleTo(t);
-    if (ang > 1e-6) r = Math.min(r, (len / N) / ang);
+    if (ang > 1e-6 && (len / N) / ang < r) { r = (len / N) / ang; u = uu; }
     prev = t;
   }
-  return r;
+  return { r, u };
+}
+
+// Ease only the control point at the tightest corner toward its neighbours
+// (a touch on the neighbours too), so the rest of the layout keeps its
+// character instead of the whole loop rounding off.
+function easeTightest(curve, pts, m, closed) {
+  const at = curve.getPointAt(m.u);
+  const n = pts.length;
+  let k = 0, bd = Infinity;
+  pts.forEach((p, i) => { const d = (p.x - at.x) ** 2 + (p.z - at.z) ** 2; if (d < bd) { bd = d; k = i; } });
+  const move = (i, amt) => {
+    if (!closed && (i <= 0 || i >= n - 1)) return;
+    const a = pts[(i + n - 1) % n], b = pts[(i + 1) % n], p = pts[i];
+    p.x += amt * (a.x + b.x - 2 * p.x); p.z += amt * (a.z + b.z - 2 * p.z);
+  };
+  move(k, 0.3);
+  if (closed || (k > 1 && k < n - 2)) { move((k + n - 1) % n, 0.08); move((k + 1) % n, 0.08); }
 }
 
 // Zones along a stage, by distance: rally alternates forest and ridge, baja
@@ -154,13 +203,10 @@ function buildStage(race, script, style, width, rand, theme) {
   curve.arcLengthDivisions = 1500;
   curve.updateArcLengths();
   const rMin = Math.max(width / 2 + 5, R_MIN[style]);
-  for (let iter = 0; iter < 60 && minRadius(curve, curve.getLength(), false) < rMin; iter++) {
-    const moved = pts.map((p, i) => {
-      if (i === 0 || i === pts.length - 1) return p.clone();
-      const a = pts[i - 1], b = pts[i + 1];
-      return new THREE.Vector3(p.x + 0.22 * (a.x + b.x - 2 * p.x), 0, p.z + 0.22 * (a.z + b.z - 2 * p.z));
-    });
-    pts.forEach((p, i) => p.copy(moved[i]));
+  for (let iter = 0; iter < 200; iter++) {
+    const m = minRadius(curve, curve.getLength(), false);
+    if (m.r >= rMin) break;
+    easeTightest(curve, pts, m, false);
     curve.updateArcLengths();
   }
   // Smoothing the corners shortens the route: run the last leg on until the
@@ -206,7 +252,7 @@ export function buildTrack(race, script) {
   if (open) {
     ({ curve, d0, len, terrain } = buildStage(race, script, style, width, rand, theme));
   } else {
-    const pts = controlPoints(style, rand);
+    const pts = controlPoints(style, rand, race.tour.vehicle);
     curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal', 0.6);
 
     // Scale so lap length matches the race script exactly (speeds line up).
@@ -225,13 +271,10 @@ export function buildTrack(race, script) {
     // refitting the length each time (smoothing shortens the loop, so the
     // refit also grows it — both help).
     const rMin = width / 2 + 5;
-    for (let iter = 0; iter < 60 && minRadius(curve, script.lapLen) < rMin; iter++) {
-      const n = pts.length;
-      const moved = pts.map((p, i) => {
-        const a = pts[(i + n - 1) % n], b = pts[(i + 1) % n];
-        return new THREE.Vector3(p.x + 0.22 * (a.x + b.x - 2 * p.x), p.y, p.z + 0.22 * (a.z + b.z - 2 * p.z));
-      });
-      pts.forEach((p, i) => p.copy(moved[i]));
+    for (let iter = 0; iter < 200; iter++) {
+      const m = minRadius(curve, script.lapLen);
+      if (m.r >= rMin) break;
+      easeTightest(curve, pts, m, true);
       fit();
     }
     len = script.lapLen;
@@ -287,24 +330,14 @@ export function buildTrack(race, script) {
   };
   const uStart = uAt(0), uFinish = open ? uAt(script.totalDist) : uAt(0);
   const sf = open ? frameAt(uFinish) : frames[0];
-  const check = new THREE.Mesh(
-    new THREE.PlaneGeometry(width + 2, 5),
-    new THREE.MeshBasicMaterial({ map: checkerTexture(), side: THREE.DoubleSide })
-  );
-  check.rotateX(-Math.PI / 2);
-  check.position.copy(sf.p).y += 0.1;
-  check.setRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), sf.tangent));
-  check.rotateX(-Math.PI / 2);
-  group.add(check);
+  // Painted on the road: the strips follow the surface, so they sit flush
+  // on a crest, a dip or a banked bend instead of poking through it.
+  group.add(roadStrip(curve, sf.u, 5, width / 2 + 1, len, new THREE.MeshBasicMaterial({ map: checkerTexture(), side: THREE.DoubleSide })));
   group.add(gantry(sf, width, race.tour.accent));
   if (open) {
     const st = frameAt(uStart);
     group.add(gantry(st, width, race.tour.accent));
-    const line = new THREE.Mesh(new THREE.PlaneGeometry(width + 2, 0.6), new THREE.MeshBasicMaterial({ color: 0xf2f2f2, side: THREE.DoubleSide }));
-    line.position.copy(st.p).y += 0.1;
-    line.setRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), st.tangent));
-    line.rotateX(-Math.PI / 2);
-    group.add(line);
+    group.add(roadStrip(curve, st.u, 0.6, width / 2 + 1, len, new THREE.MeshBasicMaterial({ color: 0xf2f2f2, side: THREE.DoubleSide })));
   }
 
   // Keep props and stands off every part of the looping road.
@@ -347,6 +380,29 @@ export function buildTrack(race, script) {
   const corners = cinematicCorners(curve, frames, width, rand, open ? { uStart, uFinish, heightAt: terrain.heightAt } : null);
   for (const c of corners) c.dist = open ? d0 + c.u * len : c.u * len;
   return { group, curve, frames, width, theme, corners, open, d0, len, uAt, heightAt: terrain ? terrain.heightAt : null, terrain };
+}
+
+// A strip `length` metres long centred on curve parameter `u`, laid on the
+// road surface (sampled along the curve, offset across it), with UVs.
+function roadStrip(curve, u, length, halfWidth, curveLen, material) {
+  const K = 8, pos = [], uv = [];
+  for (let k = 0; k <= K; k++) {
+    const uu = Math.min(1, Math.max(0, u + (k / K - 0.5) * (length / curveLen)));
+    const p = curve.getPointAt(uu), t = curve.getTangentAt(uu);
+    const n = new THREE.Vector3(-t.z, 0, t.x).normalize();
+    const a = p.clone().addScaledVector(n, -halfWidth), b = p.clone().addScaledVector(n, halfWidth);
+    pos.push(a.x, a.y + 0.08, a.z, b.x, b.y + 0.08, b.z);
+    uv.push(0, k / K, 1, k / K);
+  }
+  const idx = [];
+  for (let k = 0; k < K; k++) { const v = k * 2; idx.push(v, v + 2, v + 1, v + 1, v + 2, v + 3); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.renderOrder = 1;
+  return mesh;
 }
 
 function ribbon(frames, off0, off1, y, color) {
