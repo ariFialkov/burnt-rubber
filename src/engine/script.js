@@ -134,10 +134,12 @@ export function getScript(race) {
   // --- Enforcement bumps (holeshot leading at the lap-1 mark, etc.)
   const enforce = [];
   // The lap-1 mark in race time, from the pace profile (a slow launch makes
-  // the first lap the longest).
+  // the first lap the longest). A point-to-point stage has no lap: the mark
+  // is an early split instead.
+  const markDist = lapLen * (race.tour.laps === 1 ? 0.3 : 0.9);
   const lap1S = (() => {
     let lo = 0, hi = T;
-    for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (paceDist(mid) - GRID_OFFSET < lapLen * 0.9) lo = mid; else hi = mid; }
+    for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (paceDist(mid) - GRID_OFFSET < markDist) lo = mid; else hi = mid; }
     return lo / T;
   })();
 

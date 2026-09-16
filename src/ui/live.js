@@ -253,9 +253,12 @@ export function updateLive(ctx) {
   const t = st.tRace;
   const focusIdx = focusRacerIdx(race);
   const lap = clamp(Math.floor(script.distance(script.finishOrder[0] ?? 0, Math.min(t, script.T)) / script.lapLen) + 1, 1, race.tour.laps);
+  const leadD = clamp(script.distance(script.finishOrder[0] ?? 0, Math.min(t, script.T)), 0, script.totalDist);
   $('live-lap').textContent = st.phase === 'post' || t >= script.T
     ? '🏁 CHECKERED FLAG'
-    : `LAP ${lap}/${race.tour.laps} · ${(Math.min(t, script.T)).toFixed(0)}s`;
+    : race.tour.laps === 1
+      ? `${(leadD / 1000).toFixed(1)} / ${(script.totalDist / 1000).toFixed(1)} KM · ${(Math.min(t, script.T)).toFixed(0)}s`
+      : `LAP ${lap}/${race.tour.laps} · ${(Math.min(t, script.T)).toFixed(0)}s`;
 
   updateTower(ctx, st, script, false);
   updateLiveBets(ctx, st, script);
@@ -378,13 +381,13 @@ function detectEvents(ctx, st, script, focusIdx) {
   const s = clamp(t / script.T, 0, 1);
   const order = script.standings(s, scene?.adj ?? null);
 
-  if (!ui.holeshotAnnounced && s > 0.9 / race.tour.laps * 0.5 && s > 0.06) {
+  if (!ui.holeshotAnnounced && s > (race.tour.laps === 1 ? 0.12 : 0.9 / race.tour.laps * 0.5) && s > 0.06) {
     ui.holeshotAnnounced = true;
     addEvent(`🚀 ${race.field[order[0]].short} wins the start!`);
   }
   if (!ui.flAnnounced && s >= script.fastestLapS) {
     ui.flAnnounced = true;
-    addEvent(`⏱️ Fastest lap — ${race.field[script.fastestLapIdx].short}`);
+    addEvent(`⏱️ Fastest ${race.tour.laps === 1 ? 'split' : 'lap'} — ${race.field[script.fastestLapIdx].short}`);
   }
   if (ui.prevLeader >= 0 && order[0] !== ui.prevLeader && s < 0.97) {
     addEvent(`🔥 ${race.field[order[0]].short} takes the LEAD!`);

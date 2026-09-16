@@ -62,7 +62,9 @@ export class RaceScene {
     const sky = new THREE.Color(track.theme.sky), fogC = new THREE.Color(track.theme.fog);
     if (race.wet) { sky.lerp(grey, 0.7); fogC.lerp(grey, 0.65); }
     this.scene.background = sky;
-    this.scene.fog = new THREE.Fog(fogC, race.wet ? 120 : 250, Math.max(700, this.script.lapLen * 0.85) * (race.wet ? 0.6 : 1));
+    // A stage's terrain reaches about as far as the fog; a loop's fog scales with the lap.
+    const fogFar = track.open ? 850 : Math.max(700, this.script.lapLen * 0.85);
+    this.scene.fog = new THREE.Fog(fogC, race.wet ? 120 : 250, fogFar * (race.wet ? 0.6 : 1));
 
     this.scene.add(new THREE.HemisphereLight(0xe8f0ff, 0x50483a, race.wet ? 0.8 : 1.05));
     const sun = new THREE.DirectionalLight(race.wet ? 0xd8dde6 : 0xfff2d8, race.wet ? 0.7 : 1.6);
@@ -235,9 +237,8 @@ export class RaceScene {
   gridLane(k) { return (k % 2 === 0 ? -1 : 1) * this.track.width * 0.2; }
   gridSlot(k) {
     const { curve } = this.track;
-    const lapLen = this.script.lapLen;
     const back = GRID_OFFSET + k * this.script.pitch;
-    const u = ((-back / lapLen) % 1 + 1) % 1;
+    const u = this.track.uAt(-back);
     const p = curve.getPointAt(u);
     const t = curve.getTangentAt(u);
     const n = new THREE.Vector3(-t.z, 0, t.x);
@@ -253,9 +254,15 @@ export class RaceScene {
   // combined footprint. Cars are swept in track order and only compared with
   // the few neighbours within reach, which keeps a 40-truck Baja field cheap.
   // Visit every pair whose track-space gap is within reach, in track order.
+  // Position in track space: wraps on a loop, runs straight on a stage.
+  trackPosOf(d) {
+    if (this.track.open) return d;
+    const lapLen = this.script.lapLen;
+    return ((d % lapLen) + lapLen) % lapLen;
+  }
   eachNearPair(reach, fn) {
     const cars = this.cars;
-    const lapLen = this.script.lapLen;
+    const lapLen = this.track.open ? Infinity : this.script.lapLen;
     const order = this.order;
     const n = order.length;
     for (let a = 0; a < n; a++) {
@@ -375,7 +382,6 @@ export class RaceScene {
   yieldBack(dt, maxLon) {
     const minS = this.col.len * 2;
     const minN = this.col.width * 2;
-    const lapLen = this.script.lapLen;
     // i runs behind j, so i is the one that lifts off.
     this.eachNearPair(minS, (ci, cj, ds) => {
       if (Math.abs(cj.lane - ci.lane) >= minN - 0.05) return; // it will clear across
@@ -388,14 +394,13 @@ export class RaceScene {
       // off means slowing, never rolling backwards.
       const drop = Math.min(back, rate * dt, Math.max(0, trail.speed * dt * 0.9));
       trail.lon = clamp(trail.lon - drop, -maxLon, 0);
-      trail.trackPos = (((trail.dist + trail.lon) % lapLen) + lapLen) % lapLen;
+      trail.trackPos = this.trackPosOf(trail.dist + trail.lon);
     });
   }
 
   // mode: 'grid' | 'race'; tRace in seconds (may exceed script.T during cooldown)
   update(mode, tRace, dt, wallTime) {
     const { script, cars } = this;
-    const lapLen = script.lapLen;
     const s = clamp(tRace / script.T, 0, 1);
     const vehicle = this.race.tour.vehicle;
     const t = mode === 'grid' ? 0 : tRace;
@@ -429,7 +434,7 @@ export class RaceScene {
       }
       const dist = car.shown;
       car.dist = dist;
-      car.trackPos = ((((dist + car.lon) % lapLen) + lapLen) % lapLen);
+      car.trackPos = this.trackPosOf(dist + car.lon);
       if (mode === 'race') {
         // Hold a line, drifting slowly across the race, with a little jitter
         // on top. Overtakes then come from the separation pass, not from
@@ -476,7 +481,7 @@ export class RaceScene {
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i];
       const shown = car.dist + car.lon;
-      const u = ((shown / lapLen) % 1 + 1) % 1;
+      const u = this.track.uAt(shown);
       const p = this.track.curve.getPointAt(u);
       const tangent = this.track.curve.getTangentAt(u);
       const nrm = new THREE.Vector3(-tangent.z, 0, tangent.x);
@@ -521,12 +526,11 @@ export class RaceScene {
   poseBody(car, tangent, mode, t, dt) {
     const B = this.body;
     const vehicle = this.race.tour.vehicle;
-    const lapLen = this.script.lapLen;
     const racing = mode === 'race';
 
     // Loads. Curvature of the road just ahead gives the cornering load;
     // the steering across the road and the change of pace add to it.
-    const u2 = (((car.dist + 8) / lapLen) % 1 + 1) % 1;
+    const u2 = this.track.uAt(car.dist + 8);
     const tNext = this.track.curve.getTangentAt(u2);
     // Positive when the road bends to the right (+X being the car's left).
     const turn = Math.atan2(tangent.x * tNext.z - tangent.z * tNext.x, tangent.dot(tNext));
@@ -611,7 +615,7 @@ export class RaceScene {
     // wet, each car on its own phase; the bike's stays on in the wet.
     {
       const look = v * car.brakePoint + 6;
-      const uA = (((car.dist + look) / lapLen) % 1 + 1) % 1, uB = (((car.dist + look + 8) / lapLen) % 1 + 1) % 1;
+      const uA = this.track.uAt(car.dist + look), uB = this.track.uAt(car.dist + look + 8);
       const tA = this.track.curve.getTangentAt(uA), tB = this.track.curve.getTangentAt(uB);
       const kAhead = Math.abs(Math.atan2(tA.x * tB.z - tA.z * tB.x, tA.dot(tB))) / 8;   // curvature ahead (1/m)
       const kHere = Math.abs(turn) / 8;
@@ -699,7 +703,11 @@ export class RaceScene {
         car.dashTimer = 1 / 30;
         const laps = this.race.tour.laps;
         const lap = clamp(Math.floor(car.dist / this.script.lapLen) + 1, 1, laps);
+        const lapText = this.track.open
+          ? `${(clamp(car.dist, 0, this.script.totalDist) / 1000).toFixed(1)}/${(this.script.totalDist / 1000).toFixed(1)} KM`
+          : `LAP ${lap}/${laps}`;
         updateInstruments(this.kit, {
+          lapText, progress: clamp(car.dist / this.script.totalDist, 0, 1),
           speed: car.needleSpeed, rpm: car.needleRpm + 0.006 * Math.sin(t * 9), gear: car.gear, gears,
           braking: car.braking, wet: !!this.race.wet, drs: car.drsOpen,
           lap, laps, fuel: 1 - 0.85 * clamp(t / (this.script.T + 8), 0, 1), blink: Math.floor(t * 2) % 2 === 0,

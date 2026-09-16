@@ -114,13 +114,14 @@ export function updateBoard(ctx) {
         ${oddsBtn({ ...base, market: 'marginOver', line: m.props.marginLine, odds: m.props.marginOver, label: `Margin over ${m.props.marginLine.toFixed(1)}s`, sub: raceLabel }, 'OVER')}
         ${oddsBtn({ ...base, market: 'marginUnder', line: m.props.marginLine, odds: m.props.marginUnder, label: `Margin under ${m.props.marginLine.toFixed(1)}s`, sub: raceLabel }, 'UNDER')}
       </div>`);
-    rows.push(`<div class="rr-meta" style="padding:10px 0 4px;font-weight:800;letter-spacing:.08em">HOLESHOT — leads the opening lap</div>`);
+    const stage = race.tour.laps === 1;
+    rows.push(`<div class="rr-meta" style="padding:10px 0 4px;font-weight:800;letter-spacing:.08em">HOLESHOT — ${stage ? 'leads at the first split' : 'leads the opening lap'}</div>`);
     for (const o of m.props.holeshot.slice().sort((a, b) => a.odds - b.odds).slice(0, 8)) {
       rows.push(racerRow({ racer: o.racer }, oddsBtn({ ...base, market: 'holeshot', racerId: o.racer.id, odds: o.odds, label: `${o.racer.short} · Holeshot`, sub: raceLabel }, 'LAP 1')));
     }
-    rows.push(`<div class="rr-meta" style="padding:10px 0 4px;font-weight:800;letter-spacing:.08em">FASTEST LAP</div>`);
+    rows.push(`<div class="rr-meta" style="padding:10px 0 4px;font-weight:800;letter-spacing:.08em">${stage ? 'FASTEST SPLIT' : 'FASTEST LAP'}</div>`);
     for (const o of m.props.fastestLap.slice().sort((a, b) => a.odds - b.odds).slice(0, 8)) {
-      rows.push(racerRow({ racer: o.racer }, oddsBtn({ ...base, market: 'fastestLap', racerId: o.racer.id, odds: o.odds, label: `${o.racer.short} · Fastest Lap`, sub: raceLabel }, 'F-LAP')));
+      rows.push(racerRow({ racer: o.racer }, oddsBtn({ ...base, market: 'fastestLap', racerId: o.racer.id, odds: o.odds, label: `${o.racer.short} · Fastest ${stage ? 'Split' : 'Lap'}`, sub: raceLabel }, stage ? 'F-SPLIT' : 'F-LAP')));
     }
   }
 

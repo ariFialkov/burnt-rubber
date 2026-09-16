@@ -229,6 +229,24 @@ live: needles follow speed and revs, the gear steps with speed, the lap
 and fuel count down, warning lamps light for braking, rain and low fuel,
 and the formula wheel's shift lights fill with the revs and show DRS.
 
+**Stages.** Rally and Baja are point-to-point, not loops: the start and
+the flying finish are kilometres apart, with a grid straight before the
+line and run-off after it. `src/three/trackGen.js` walks the route as a
+chain of zones — a rally alternates tight forest (quick cuts, a narrow
+lane) with mountain ridges (contour sweeps along a hillside); a baja runs
+through dunes, plains, mesas and canyons — with each zone's own bend
+sharpness and straight lengths, kept clear of its own earlier legs and
+steered so it never doubles back. `src/three/terrain.js` then builds the
+land: a heightfield whose zone character is a distance-weighted average
+over the whole route (so it never seams between two legs) and settles into
+mountains or mesa country far off; the road's profile is that relief
+low-passed and grade-limited, and the terrain blends to it over a shoulder
+so the road reads as cut and filled into the hillside. Instanced pines,
+rocks, cacti and scrub dress it by zone. Everything that assumed a lap —
+grid placement, corner look-ahead, the cinematic corner chain, collisions
+in track space, the lap counters — goes through the track's own
+distance-to-curve mapping, so loops and stages share one scene.
+
 **Surfaces.** `src/three/effects.js` puts what the cars leave on the road
 and throw up behind them into two draw calls. Tyre marks are quads laid
 from each rear wheel's contact point into a ring-buffered mesh: rally cars

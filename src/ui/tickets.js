@@ -74,7 +74,10 @@ function legChip(leg, now) {
     default: break; // holeshot / fastest lap / margin: position isn't the story
   }
   const cls = good === null ? 'live' : good ? 'ok' : 'bad';
-  return `<span class="tk-chip ${cls}">${tag} ● P${p} · lap ${lap}/${race.tour.laps}</span>`;
+  const where = race.tour.laps === 1
+    ? `${(clamp(script.distance(script.finishOrder[0], Math.min(st.tRace, script.T)), 0, script.totalDist) / 1000).toFixed(1)} km`
+    : `lap ${lap}/${race.tour.laps}`;
+  return `<span class="tk-chip ${cls}">${tag} ● P${p} · ${where}</span>`;
 }
 
 function jumpTarget(bet, now) {

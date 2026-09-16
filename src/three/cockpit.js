@@ -121,7 +121,7 @@ export function drawDash(g, style, st) {
     // the stage marker crawls along the route with the race
     const p = Math.max(0, Math.min(1, st.progress || 0)) * 160 + 250;
     g.fillStyle = '#ffd12a'; g.beginPath(); g.arc(p, 90 - Math.abs(Math.sin(p * 0.05)) * 40, 4, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#2ee6a8'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText(`GPS · LAP ${st.lap}/${st.laps} · ${Math.round(speedShown)} MPH`, 238, 36);
+    g.fillStyle = '#2ee6a8'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText(`GPS · ${st.lapText || `LAP ${st.lap}/${st.laps}`} · ${Math.round(speedShown)} MPH`, 238, 36);
     g.textAlign = 'right'; g.fillText(`G${st.gear}`, 424, 100);
     lampRow(g, 452, 44, lamps.slice(0, 3).map((l) => [l[0], l[1], l[2]]).map((l, k) => k === 2 ? l : l));
     // fuel bar
@@ -149,7 +149,7 @@ export function drawWheelDisplay(g, st) {
   g.fillStyle = '#e8ecf4'; g.font = 'bold 44px sans-serif'; g.textAlign = 'center'; g.fillText(String(st.gear), 128, 88);
   g.font = 'bold 14px sans-serif'; g.fillStyle = st.drs ? '#2ee6a8' : '#8b94a7'; g.textAlign = 'left'; g.fillText(st.drs ? 'DRS OPEN' : 'DRS', 14, 60);
   g.fillStyle = st.wet ? '#38b6ff' : '#8b94a7'; g.textAlign = 'right'; g.fillText(st.wet ? 'WET' : 'DRY', 242, 60);
-  g.fillStyle = '#8b94a7'; g.textAlign = 'left'; g.fillText(`LAP ${st.lap}/${st.laps}`, 14, 110);
+  g.fillStyle = '#8b94a7'; g.textAlign = 'left'; g.fillText(st.lapText || `LAP ${st.lap}/${st.laps}`, 14, 110);
   g.textAlign = 'right'; g.fillText(`${Math.round(st.speed * 3.6)} KM/H`, 242, 110);
   g.fillStyle = st.braking ? '#ff4d5e' : '#2a2d35'; g.beginPath(); g.arc(128, 112, 6, 0, Math.PI * 2); g.fill();
 }

@@ -88,6 +88,8 @@ export class CameraRig {
       look = rs.centroid.clone();
       fov = 52; stiff = 2.2;
     }
+    // Terrain under a stage: never fly the chopper into a ridge.
+    if (rs.track.heightAt && !onboard) pos.y = Math.max(pos.y, rs.track.heightAt(pos.x, pos.z) + (this.mode === 'cine' ? 4 : 18));
 
     const k = this.snap ? 1 : 1 - Math.exp(-stiff * dt);
     const kl = this.snap ? 1 : 1 - Math.exp(-Math.max(stiff, 6) * dt);
@@ -122,10 +124,13 @@ export class CameraRig {
       // nearest corner whose absolute distance is ahead of the leader
       let best = null;
       for (const c of corners) {
-        const k = Math.ceil((leadD + 15 - c.u * lapLen) / lapLen);
-        const abs = c.u * lapLen + k * lapLen;
+        let abs;
+        if (rs.track.open) { abs = c.dist; if (abs < leadD + 15) continue; }
+        else { const k = Math.ceil((leadD + 15 - c.dist) / lapLen); abs = c.dist + k * lapLen; }
         if (!best || abs < best.triggerDist) best = { u: c.u, pos: c.pos, triggerDist: abs };
       }
+      // past the last corner of a stage: stay on the finish
+      if (!best) { const c = corners[corners.length - 1]; best = { u: c.u, pos: c.pos, triggerDist: Infinity }; }
       this.cineCorner = best;
       this.snap = true; // hard cut, like a broadcast switch
     }
