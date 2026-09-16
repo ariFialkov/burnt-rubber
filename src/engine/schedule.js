@@ -8,10 +8,10 @@ import { RACER_BANKS } from '../data/racers.js';
 
 export const EPOCH0 = Date.UTC(2026, 0, 1); // world time zero
 export const BET_S = 72;   // betting window
-export const RACE_S = 48;  // ~45s of racing + formation buffer
+export const RACE_S = 68;  // the longest race (~52s) plus the tail of a 40-truck field
 export const POST_S = 15;  // results / cooldown
-export const CYCLE_S = BET_S + RACE_S + POST_S; // 135s
-const STAGGER_S = 27;      // tour offsets: a race goes green every ~27s somewhere
+export const CYCLE_S = BET_S + RACE_S + POST_S; // 155s
+const STAGGER_S = 31;      // tour offsets: a race goes green every ~31s somewhere
 
 const PURSES = [120, 180, 250, 400, 600, 750, 1000]; // display "purse" in K
 

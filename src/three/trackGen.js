@@ -141,7 +141,9 @@ function walkRoute(style, need, zones, rand, sep) {
 function buildStage(race, script, style, width, rand, theme) {
   const n = race.field.length;
   const pre = GRID_OFFSET + n * script.pitch + 40;           // grid straight before the line
-  const post = script.pace.cruise * 9 + 80;                   // run-off past the flying finish
+  // run-off past the flying finish: the live view runs to the end of the
+  // race window, and the leader keeps its pace all the way
+  const post = script.pace.cruise * (script.raceS - script.T + 1) + 80;
   const need = pre + script.totalDist + post;
   const zones = makeZones(style, need, rand);
   const pts = walkRoute(style, need, zones, rand, style === 'rally' ? 110 : 170);
@@ -159,6 +161,16 @@ function buildStage(race, script, style, width, rand, theme) {
       return new THREE.Vector3(p.x + 0.22 * (a.x + b.x - 2 * p.x), 0, p.z + 0.22 * (a.z + b.z - 2 * p.z));
     });
     pts.forEach((p, i) => p.copy(moved[i]));
+    curve.updateArcLengths();
+  }
+  // Smoothing the corners shortens the route: run the last leg on until the
+  // curve really is long enough for the grid, the stage and the run-off.
+  while (curve.getLength() < need + 80) {
+    const a = pts[pts.length - 2], b = pts[pts.length - 1];
+    const dir = b.clone().sub(a).setY(0).normalize();
+    pts.push(b.clone().addScaledVector(dir, 100));
+    curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.5);
+    curve.arcLengthDivisions = 1500;
     curve.updateArcLengths();
   }
   // Samples every 5 m along the plan, for the terrain and the road profile.
@@ -334,7 +346,7 @@ export function buildTrack(race, script) {
 
   const corners = cinematicCorners(curve, frames, width, rand, open ? { uStart, uFinish, heightAt: terrain.heightAt } : null);
   for (const c of corners) c.dist = open ? d0 + c.u * len : c.u * len;
-  return { group, curve, frames, width, theme, corners, open, d0, len, uAt, heightAt: terrain ? terrain.heightAt : null };
+  return { group, curve, frames, width, theme, corners, open, d0, len, uAt, heightAt: terrain ? terrain.heightAt : null, terrain };
 }
 
 function ribbon(frames, off0, off1, y, color) {

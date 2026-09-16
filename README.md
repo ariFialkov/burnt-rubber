@@ -110,9 +110,13 @@ exactly to the scripted finish.
 per-class profile — launch acceleration and cruising speed
 (`PACE` in `src/engine/script.js`): formula cars launch hard and run fast,
 stock cars wind up slowly to a high speed, rally cars and bikes sit in the
-middle (bikes launch hard), trophy trucks lumber. The race distance is
-wherever the pace car gets to in the leader's 40 seconds, so the lap length
-follows from the profile. Gaps are kept in seconds but drawn in metres: on
+middle (bikes launch hard), trophy trucks lumber. The base race distance is
+wherever the pace car gets to in 40 seconds, so the lap length follows from
+the profile; each tour then scales that distance (`distScale` in
+`src/data/tours.js` — an extra lap on the loops, a quarter more stage on
+rally and baja) and the leader's time follows from the distance, about 48
+to 52 seconds. The race window is sized so a 40-truck field's tail is home
+before the results. Gaps are kept in seconds but drawn in metres: on
 the grid a second is one row pitch, at cruise it is a cruise-speed's worth of
 road, so the whole field launches together from its real slots and stretches
 out as the speed builds. Every surge or fade (holeshot enforcement, popup

@@ -25,7 +25,7 @@ export const SURFACE = {
   baja:    { kind: 'dirt', mark: 0x5a4530, shallowAlpha: 0.09, hardAlpha: 0.32, width: 0.34, dust: 0xcdb289, mud: 0x5c4630, big: true },
 };
 
-const MAX_MARKS = 80000;      // quads in the ring (~57k laid in a 40-truck dirt race)
+const MAX_MARKS = 96000;      // quads in the ring (~60k laid in a 40-truck dirt race)
 const MAX_PARTICLES = 6000;
 
 let softTex = null;
@@ -193,7 +193,7 @@ export class SurfaceFX {
     const d = Math.hypot(p.x - track.last.x, p.z - track.last.z);
     // Quads are laid end to end, so spacing only sets how faithfully a curve
     // is followed (a 2.4 m chord on a 40 m corner is 2 cm off, under the width).
-    const spacing = S.kind === 'dirt' ? (hard ? 1.6 : 2.4) : 1.2;
+    const spacing = S.kind === 'dirt' ? (hard ? 1.8 : 2.8) : 1.2;
     if (d < spacing) return;
     if (d > 25) { track.last.copy(p); return; } // teleport (lap wrap, reset)
     if (S.kind === 'dirt') {

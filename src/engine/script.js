@@ -10,7 +10,7 @@ import { rngFor, sampleOrder, clamp, lerp } from '../core/rng.js';
 import { scriptWeights } from './odds.js';
 import { RACE_S } from './schedule.js';
 
-export const LEADER_FINISH_S = 40; // leader completes the distance at t=40s
+export const LEADER_FINISH_S = 40; // base race: the pace car's 40 seconds; tours scale the distance
 
 // How each class of vehicle moves: launch acceleration (m/s²) and cruising
 // speed (m/s). The pace car — the virtual leader every gap is measured
@@ -95,14 +95,16 @@ export function getScript(race) {
   const gridSlotOf = new Array(n);
   grid.forEach((racerI, k) => { gridSlotOf[racerI] = k; });
 
-  const T = LEADER_FINISH_S;
   const pace = PACE[race.tour.vehicle] || PACE.formula;
   const { accel, cruise } = pace;
   // Pace-car profile: v = cruise·tanh(accel·t/cruise) starts at `accel` and
   // eases into `cruise` with no knee; its integral is the distance.
   const paceSpeed = (t) => cruise * Math.tanh((accel * t) / cruise);
   const paceDist = (t) => ((cruise * cruise) / accel) * Math.log(Math.cosh((accel * t) / cruise));
-  const totalDist = paceDist(T);
+  // The race distance is the base 40 seconds' worth scaled by the tour (an
+  // extra lap on a loop, a longer stage); the leader's time follows from it.
+  const totalDist = paceDist(LEADER_FINISH_S) * (race.tour.distScale ?? 1);
+  const T = (() => { let lo = 0, hi = 200; for (let k = 0; k < 50; k++) { const mid = (lo + hi) / 2; if (paceDist(mid) < totalDist) lo = mid; else hi = mid; } return lo; })();
   const lapLen = totalDist / race.tour.laps;
   const paceMps = cruise;
 
@@ -194,7 +196,7 @@ export function getScript(race) {
   }
 
   const script = {
-    race, T, lapLen, totalDist, paceMps, pace, pitch,
+    race, T, lapLen, totalDist, paceMps, pace, pitch, raceS: RACE_S,
     paceSpeed, paceDist, gapScale,
     shape, upToSpeed, maxAmp,
     grid, gridSlotOf, finishOrder, finalGap, margin,

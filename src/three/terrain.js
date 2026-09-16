@@ -95,6 +95,12 @@ export function buildTerrain({ style, theme, samples, zones, halfW, rand, flats 
   const M = samples.length;
   const dTheta = rand() * Math.PI, dTheta2 = dTheta + 0.9 + rand() * 0.8; // dune crest directions
   const blendW = baja ? 34 : 24;
+  // Terrain grid cell. Nothing within a cell and a half of the road may rise
+  // above it: a triangle from inside the road to a vertex already up the
+  // hillside would otherwise cross the road surface and bury the cars on the
+  // uphill side.
+  const cell = 12;
+  const corridor = halfW + cell * 1.5;
 
   // Zone weights as a smooth field over the plane: a distance-weighted
   // average over every route sample (a nearest-sample lookup would jump
@@ -197,18 +203,20 @@ export function buildTerrain({ style, theme, samples, zones, halfW, rand, flats 
     return out;
   };
   let y = smooth(roadY, Math.round(45 / ds));
-  const gmax = baja ? 0.10 : 0.14;
-  for (let i = 1; i < M; i++) y[i] = clamp(y[i], y[i - 1] - gmax * ds, y[i - 1] + gmax * ds);
-  for (let i = M - 2; i >= 0; i--) y[i] = clamp(y[i], y[i + 1] - gmax * ds, y[i + 1] + gmax * ds);
-  y = smooth(y, Math.round(20 / ds));
-  // level the grid and the finish area
+  // level the grid and the finish area (before the grade limit and the last
+  // smoothing, so the way in and out of the level stretch is drivable too)
+  for (const f of flats) f.y = y[f.i];
   for (let i = 0; i < M; i++) {
     const q = samples[i];
     for (const f of flats) {
       const k = 1 - sstep(f.r * 0.5, f.r, Math.abs(q.s - f.s));
-      if (k > 0) y[i] = lerp(y[i], f.y ?? y[f.i], k);
+      if (k > 0) y[i] = lerp(y[i], f.y, k);
     }
   }
+  const gmax = baja ? 0.10 : 0.14;
+  for (let i = 1; i < M; i++) y[i] = clamp(y[i], y[i - 1] - gmax * ds, y[i - 1] + gmax * ds);
+  for (let i = M - 2; i >= 0; i--) y[i] = clamp(y[i], y[i + 1] - gmax * ds, y[i + 1] + gmax * ds);
+  y = smooth(y, Math.round(20 / ds));
   for (const f of flats) f.y = y[f.i];
   roadY.set(y);
   const roadYAt = (near) => { const j = clamp(near.i, 0, M - 2); return lerp(roadY[j], roadY[j + 1], near.f); };
@@ -218,11 +226,16 @@ export function buildTerrain({ style, theme, samples, zones, halfW, rand, flats 
     const f = field(x, z), near = f.near;
     let h = relief(x, z, f);
     const t = sstep(halfW + 2.5, halfW + 2.5 + blendW, near.d);
-    h = lerp(roadYAt(near) - 0.35, h, t);
+    const road = roadYAt(near);
+    h = lerp(road - 0.35, h, t);
+    if (near.d < corridor) h = Math.min(h, road - 0.35);
+    // Levelled ground (grid, finish) follows the road beside it, which the
+    // profile step already levelled: never a fixed height the road could
+    // dip under on the fringe.
     for (const f of flats) {
       const dx = x - f.x, dz = z - f.z;
       const k = 1 - sstep(f.r * 0.55, f.r, Math.hypot(dx, dz));
-      if (k > 0) h = lerp(h, f.y - 0.35, k);
+      if (k > 0) h = lerp(h, road - 0.35, k);
     }
     return h;
   }
@@ -230,7 +243,7 @@ export function buildTerrain({ style, theme, samples, zones, halfW, rand, flats 
   // --- the mesh: a grid over the route's bounding box plus a margin
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const q of samples) { minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x); minZ = Math.min(minZ, q.z); maxZ = Math.max(maxZ, q.z); }
-  const margin = 820, cell = 14;
+  const margin = 820;
   const x0 = minX - margin, z0 = minZ - margin;
   const nx = Math.ceil((maxX - minX + 2 * margin) / cell), nz = Math.ceil((maxZ - minZ + 2 * margin) / cell);
   const pos = new Float32Array((nx + 1) * (nz + 1) * 3);
@@ -244,10 +257,12 @@ export function buildTerrain({ style, theme, samples, zones, halfW, rand, flats 
       const f = field(x, z), near = f.near;
       let h = relief(x, z, f);
       const t = sstep(halfW + 2.5, halfW + 2.5 + blendW, near.d);
-      h = lerp(roadYAt(near) - 0.35, h, t);
+      const road = roadYAt(near);
+      h = lerp(road - 0.35, h, t);
+      if (near.d < corridor) h = Math.min(h, road - 0.35);
       for (const fl of flats) {
         const kk = 1 - sstep(fl.r * 0.55, fl.r, Math.hypot(x - fl.x, z - fl.z));
-        if (kk > 0) h = lerp(h, fl.y - 0.35, kk);
+        if (kk > 0) h = lerp(h, road - 0.35, kk);
       }
       pos[k * 3] = x; pos[k * 3 + 1] = h; pos[k * 3 + 2] = z;
       info[k] = { w: f.w, road: roadYAt(near), d: near.d };
@@ -383,5 +398,5 @@ export function buildTerrain({ style, theme, samples, zones, halfW, rand, flats 
     return g;
   }
 
-  return { group, heightAt, roadY, nearest };
+  return { group, heightAt, roadY, nearest, mesh, grid: { x0, z0, cell, nx, nz } };
 }
