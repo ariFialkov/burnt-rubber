@@ -38,39 +38,63 @@ const WALK = {
 const ZONE_LEN = { rally: [350, 650], baja: [300, 520] };
 const R_MIN = { rally: 16, baja: 30 };
 
+// Grand-prix style layouts, by vehicle: how many control points around
+// the ring, how far the radius swings (sweepers and esses), how many are
+// pulled hard inward (hairpins), whether there is an esses complex, and how
+// many runs of points are set on a line for a real straight. The bike's
+// layout is a step calmer than the formula car's.
+const GP = {
+  formula: { nPts: [14, 17], noise: 0.45, pulls: [1, 2], esses: 1, straights: 2 },
+  moto:    { nPts: [13, 16], noise: 0.45, pulls: [1, 1], esses: 1, straights: 1 },
+};
+
+function gpLayout(rand, P) {
+  const pts = [];
+  const nPts = P.nPts[0] + Math.floor(rand() * (P.nPts[1] - P.nPts[0] + 1));
+  const base = 220;
+  const stretch = 1.15 + rand() * 0.55;
+  const angles = [], radii = [];
+  for (let k = 0; k < nPts; k++) angles.push((k + (rand() - 0.5) * 0.6) / nPts * Math.PI * 2);
+  for (let k = 0; k < nPts; k++) radii.push(base * (1 - P.noise / 2 + rand() * P.noise));
+  const used = new Set([0, nPts - 1]);
+  const claim = (from, to) => { for (let j = from; j <= to; j++) used.add(j); };
+  const free = (from, to) => { for (let j = from - 1; j <= to + 1; j++) if (used.has(j)) return false; return true; };
+  // hairpins: pulled well inside, never two next to each other
+  const pulls = P.pulls[0] + Math.floor(rand() * (P.pulls[1] - P.pulls[0] + 1));
+  for (let n = 0; n < pulls; n++) {
+    for (let tries = 0; tries < 20; tries++) {
+      const k = 1 + Math.floor(rand() * (nPts - 2));
+      if (!free(k, k)) continue;
+      radii[k] *= 0.45 + rand() * 0.2; claim(k, k); break;
+    }
+  }
+  // an esses complex: three neighbours in, out, in
+  for (let n = 0; n < P.esses; n++) {
+    for (let tries = 0; tries < 20; tries++) {
+      const k = 1 + Math.floor(rand() * (nPts - 4));
+      if (!free(k, k + 2)) continue;
+      radii[k] *= 0.8; radii[k + 1] *= 1.12; radii[k + 2] *= 0.8; claim(k, k + 2); break;
+    }
+  }
+  // straights: three or four neighbours set on one line (the tangent at the
+  // middle one), so the lap has somewhere to open up between the corners
+  for (let n = 0; n < P.straights; n++) {
+    for (let tries = 0; tries < 30; tries++) {
+      const span = 3 + Math.floor(rand() * 2);
+      const k = 1 + Math.floor(rand() * (nPts - span - 1));
+      if (!free(k, k + span - 1)) continue;
+      const mid = k + Math.floor(span / 2), am = angles[mid], D = radii[mid];
+      for (let j = k; j < k + span; j++) radii[j] = D / Math.max(0.5, Math.cos(angles[j] - am));
+      claim(k, k + span - 1); break;
+    }
+  }
+  for (let k = 0; k < nPts; k++) pts.push(new THREE.Vector3(Math.cos(angles[k]) * radii[k] * stretch, 0, Math.sin(angles[k]) * radii[k]));
+  return pts;
+}
+
 function controlPoints(style, rand, vehicle) {
   const pts = [];
-  if (vehicle === 'formula') {
-    // A grand-prix layout: many points at uneven angles around a stretched
-    // ring, big radius swings for esses and sweepers, and a few pulled hard
-    // inward for hairpins and chicane complexes. Radial, so it never crosses.
-    const nPts = 18 + Math.floor(rand() * 6);
-    const base = 220, noise = 0.7;
-    const stretch = 1.15 + rand() * 0.55;
-    const angles = [];
-    for (let k = 0; k < nPts; k++) angles.push((k + (rand() - 0.5) * 0.6) / nPts * Math.PI * 2);
-    for (const a of angles) {
-      const r = base * (1 - noise / 2 + rand() * noise);
-      pts.push(new THREE.Vector3(Math.cos(a) * r * stretch, 0, Math.sin(a) * r));
-    }
-    // hairpins / chicanes: pulled well inside, never two next to each other
-    const pulls = 2 + Math.floor(rand() * 2);
-    const used = new Set([0, nPts - 1]);
-    for (let n = 0; n < pulls; n++) {
-      let k = 0;
-      for (let tries = 0; tries < 20; tries++) { k = 1 + Math.floor(rand() * (nPts - 2)); if (!used.has(k) && !used.has(k - 1) && !used.has(k + 1)) break; }
-      used.add(k);
-      pts[k].multiplyScalar(0.45 + rand() * 0.2);
-    }
-    // an esses complex: three neighbours pushed in, out, in
-    for (let tries = 0; tries < 20; tries++) {
-      const k = 2 + Math.floor(rand() * (nPts - 5));
-      if ([k - 1, k, k + 1, k + 2, k + 3].some((j) => used.has(j))) continue;
-      pts[k].multiplyScalar(0.8); pts[k + 1].multiplyScalar(1.12); pts[k + 2].multiplyScalar(0.8);
-      break;
-    }
-    return pts;
-  }
+  if (GP[vehicle]) return gpLayout(rand, GP[vehicle]);
   if (style === 'oval') {
     const rx = 230 + rand() * 60, rz = 120 + rand() * 40;
     for (let k = 0; k < 8; k++) {
@@ -469,9 +493,11 @@ function grandstand(curve, u, width, rand, clearOfTrack) {
   const off0 = width / 2 + 14;
   // Pick a side whose whole footprint stays off the road (loops come back).
   const footprintClear = (sd) => {
-    for (const along of [-len / 2, 0, len / 2]) {
-      const c = p.clone().addScaledVector(n, sd * off0).addScaledVector(t, along);
-      if (!clearOfTrack(c, width / 2 + 8)) return false;
+    for (const along of [-len / 2, -len / 4, 0, len / 4, len / 2]) {
+      for (const across of [-6, 0, 6]) {
+        const c = p.clone().addScaledVector(n, sd * off0 + across).addScaledVector(t, along);
+        if (!clearOfTrack(c, width / 2 + 4)) return false;
+      }
     }
     return true;
   };

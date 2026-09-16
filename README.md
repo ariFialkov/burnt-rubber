@@ -233,11 +233,13 @@ live: needles follow speed and revs, the gear steps with speed, the lap
 and fuel count down, warning lamps light for braking, rain and low fuel,
 and the formula wheel's shift lights fill with the revs and show DRS.
 
-**Circuits.** The formula layout is a grand-prix style ring: twenty-odd
-control points at uneven angles with big radius swings for sweepers and
-esses, a few pulled hard inward for hairpins and an esses complex, all
-radial so the lap never crosses itself, then relaxed until no corner is
-tighter than the road can take. Start and finish strips are laid on the
+**Circuits.** The formula and bike layouts are grand-prix style rings
+(`GP` in `src/three/trackGen.js`): control points at uneven angles with
+radius swings for sweepers and esses, one or two pulled hard inward for
+hairpins, an esses complex, and runs of points set on a line for real
+straights — all radial so the lap never crosses itself, then relaxed at
+the tightest corner only until nothing is tighter than the road can take.
+The bike's layout is a step calmer than the formula car's, on a 1 km lap. Start and finish strips are laid on the
 road surface itself, so they sit flush on crests, dips and banking.
 
 **Stages.** Rally and Baja are point-to-point, not loops: the start and
