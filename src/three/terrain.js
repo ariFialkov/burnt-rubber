@@ -16,6 +16,7 @@
 
 import * as THREE from 'three';
 import { clamp, lerp } from '../core/rng.js';
+import * as F from './flora.js';
 
 const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
@@ -317,8 +318,7 @@ export function buildTerrain({ style, theme, samples, zones, halfW, rand, flats 
   floor.position.set((minX + maxX) / 2, minY - 2, (minZ + maxZ) / 2);
   group.add(floor);
 
-  // --- dressing
-  group.add(baja ? desertDressing() : forestDressing());
+  // --- dressing (built below, after the scatter helpers)
 
   function scatter(count, spread, accept, place) {
     const m = new THREE.Matrix4(), p = new THREE.Vector3(), qn = new THREE.Quaternion(), sc = new THREE.Vector3();
@@ -343,60 +343,44 @@ export function buildTerrain({ style, theme, samples, zones, halfW, rand, flats 
     return n;
   }
 
+  // Scatter one species: returns its matrices.
+  function species(count, spread, accept, scaleRange, sink = -0.3, yScale = null) {
+    const mats = [];
+    scatter(count, spread, accept, Object.assign((zw, r) => {
+      const s = scaleRange[0] + r() * (scaleRange[1] - scaleRange[0]);
+      return { scale: { x: s, y: s * (yScale ? yScale(r) : 1), z: s }, yaw: r() * Math.PI * 2 };
+    }, { set: (i, m) => { mats[i] = m.clone(); }, sink }));
+    return mats;
+  }
+  const builders = { ...F.SPECIES, redRock: (r) => F.rock(r, 0x9a6a4c) };
+  const addAll = (g, list) => { for (const [kind, mats] of list) if (mats.length) g.add(F.instanced(builders[kind](rand), mats, kind)); };
+
   function forestDressing() {
     const g = new THREE.Group();
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3626 });
-    const canopyMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(0x2f5d3a).lerp(ground, 0.2) });
-    const COUNT = 2600;
-    const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.28, 0.45, 3.2, 5).translate(0, 1.6, 0), trunkMat, COUNT);
-    const canopy = new THREE.InstancedMesh(new THREE.ConeGeometry(2.4, 9.5, 6).translate(0, 7.2, 0), canopyMat, COUNT);
-    const mats = [];
-    const n = scatter(COUNT, 150, (zw, near) => 0.12 + 0.9 * (zw.w.forest || 0) * (near.d < 60 ? 1 : 0.55), Object.assign((zw, r) => {
-      const s = 0.7 + r() * 0.8;
-      return { scale: { x: s, y: s * (0.85 + r() * 0.5), z: s }, yaw: r() * Math.PI * 2 };
-    }, { set: (i, m) => { mats[i] = m.clone(); }, sink: -0.3 }));
-    for (let i = 0; i < n; i++) { trunk.setMatrixAt(i, mats[i]); canopy.setMatrixAt(i, mats[i]); }
-    trunk.count = canopy.count = n;
-    trunk.frustumCulled = canopy.frustumCulled = false;
-    g.add(trunk, canopy);
-    // rocks on the ridges
-    const rockMat = new THREE.MeshLambertMaterial({ color: 0x77736e });
-    const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1.6, 0), rockMat, 260);
-    const rm = scatter(260, 120, (zw) => 0.08 + 0.8 * (zw.w.ridge || 0), Object.assign((zw, r) => {
-      const s = 0.6 + r() * 2.2;
-      return { scale: { x: s, y: s * 0.7, z: s * (0.7 + r() * 0.6) }, yaw: r() * Math.PI * 2 };
-    }, { set: (i, m) => rocks.setMatrixAt(i, m), sink: -0.4 }));
-    rocks.count = rm; rocks.frustumCulled = false;
-    g.add(rocks);
+    const forest = (zw, near) => (0.12 + 0.9 * (zw.w.forest || 0)) * (near.d < 60 ? 1 : 0.55);
+    addAll(g, [
+      ['spruce', species(1100, 150, forest, [0.7, 1.4], -0.3, (r) => 0.85 + r() * 0.4)],
+      ['fir', species(700, 150, forest, [0.7, 1.3], -0.3, (r) => 0.85 + r() * 0.4)],
+      ['oak', species(320, 140, (zw, near) => forest(zw, near) * 0.7, [0.7, 1.2])],
+      ['birch', species(360, 140, forest, [0.8, 1.2])],
+      ['stump', species(140, 90, (zw) => 0.1 + 0.9 * (zw.w.forest || 0), [0.8, 1.4], -0.25)],
+      ['log', species(110, 90, (zw) => 0.1 + 0.9 * (zw.w.forest || 0), [0.8, 1.3], -0.2)],
+      ['bushRound', species(300, 110, (zw) => 0.3 + 0.6 * (zw.w.forest || 0), [0.6, 1.2], -0.3)],
+      ['rock', species(320, 120, (zw) => 0.08 + 0.8 * (zw.w.ridge || 0), [0.6, 2.4], -0.4, (r) => 0.6 + r() * 0.5)],
+    ]);
     return g;
   }
 
   function desertDressing() {
     const g = new THREE.Group();
-    const cactusMat = new THREE.MeshLambertMaterial({ color: 0x4d7d3f });
-    const cactus = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.45, 0.6, 4.5, 6).translate(0, 2.2, 0), cactusMat, 320);
-    const cn = scatter(320, 200, (zw) => 0.05 + 0.7 * (zw.w.plains || 0) + 0.5 * (zw.w.mesa || 0), Object.assign((zw, r) => {
-      const s = 0.6 + r() * 0.9;
-      return { scale: { x: s, y: s * (0.8 + r() * 0.7), z: s }, yaw: r() * Math.PI * 2 };
-    }, { set: (i, m) => cactus.setMatrixAt(i, m), sink: -0.3 }));
-    cactus.count = cn; cactus.frustumCulled = false;
-    const scrubMat = new THREE.MeshLambertMaterial({ color: 0x6b7a3a });
-    const scrub = new THREE.InstancedMesh(new THREE.SphereGeometry(1.1, 5, 4).translate(0, 0.6, 0), scrubMat, 900);
-    const sn = scatter(900, 220, (zw) => 0.15 + 0.8 * (zw.w.plains || 0) + 0.4 * (zw.w.mesa || 0) + 0.3 * (zw.w.canyon || 0), Object.assign((zw, r) => {
-      const s = 0.6 + r() * 1.1;
-      return { scale: { x: s, y: s * 0.7, z: s }, yaw: r() * Math.PI * 2 };
-    }, { set: (i, m) => scrub.setMatrixAt(i, m), sink: -0.3 }));
-    scrub.count = sn; scrub.frustumCulled = false;
-    const rockMat = new THREE.MeshLambertMaterial({ color: 0x9a6a4c });
-    const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1.6, 0), rockMat, 360);
-    const rn = scatter(360, 160, (zw) => 0.1 + 0.8 * (zw.w.canyon || 0) + 0.6 * (zw.w.mesa || 0), Object.assign((zw, r) => {
-      const s = 0.6 + r() * 2.6;
-      return { scale: { x: s, y: s * 0.7, z: s * (0.7 + r() * 0.6) }, yaw: r() * Math.PI * 2 };
-    }, { set: (i, m) => rocks.setMatrixAt(i, m), sink: -0.5 }));
-    rocks.count = rn; rocks.frustumCulled = false;
-    g.add(cactus, scrub, rocks);
+    addAll(g, [
+      ['cactus', species(380, 200, (zw) => 0.05 + 0.7 * (zw.w.plains || 0) + 0.5 * (zw.w.mesa || 0), [0.7, 1.4], -0.25, (r) => 0.85 + r() * 0.4)],
+      ['scrub', species(900, 220, (zw) => 0.15 + 0.8 * (zw.w.plains || 0) + 0.4 * (zw.w.mesa || 0) + 0.3 * (zw.w.canyon || 0), [0.6, 1.5], -0.3)],
+      ['rock', species(360, 160, (zw) => 0.1 + 0.8 * (zw.w.canyon || 0) + 0.6 * (zw.w.mesa || 0), [0.6, 2.8], -0.5, (r) => 0.6 + r() * 0.5)],
+    ].map(([k, m]) => (k === 'rock' ? ['redRock', m] : [k, m])));
     return g;
   }
 
+  group.add(baja ? desertDressing() : forestDressing());
   return { group, heightAt, roadY, nearest, mesh, grid: { x0, z0, cell, nx, nz } };
 }

@@ -2,7 +2,7 @@
 // the freshly deployed build, offline the cached copy plays fully (the whole
 // game is static and deterministic — races run off the world clock).
 
-const CACHE = 'burnt-rubber-v15';
+const CACHE = 'burnt-rubber-v16';
 const ASSETS = [
   '.',
   'index.html',
@@ -21,6 +21,9 @@ const ASSETS = [
   'src/engine/odds.js',
   'src/engine/script.js',
   'src/engine/bets.js',
+  'src/three/flora.js',
+  'src/three/trackside.js',
+  'src/three/dressing.js',
   'src/three/terrain.js',
   'src/three/trackGen.js',
   'src/three/carFactory.js',

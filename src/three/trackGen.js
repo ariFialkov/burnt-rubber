@@ -5,6 +5,8 @@
 import * as THREE from 'three';
 import { rngFor, clamp, lerp } from '../core/rng.js';
 import { buildTerrain } from './terrain.js';
+import { buildGrandstand, buildGantry, tickCrowds } from './trackside.js';
+import { dressLoop } from './dressing.js';
 import { GRID_OFFSET } from '../engine/script.js';
 
 const ENV_THEMES = {
@@ -357,10 +359,12 @@ export function buildTrack(race, script) {
   // Painted on the road: the strips follow the surface, so they sit flush
   // on a crest, a dip or a banked bend instead of poking through it.
   group.add(roadStrip(curve, sf.u, 5, width / 2 + 1, len, new THREE.MeshBasicMaterial({ map: checkerTexture(), side: THREE.DoubleSide })));
-  group.add(gantry(sf, width, race.tour.accent));
+  const screens = { line: null, start: null };
+  { const gt = buildGantry(sf, width, race.tour.accent); group.add(gt.group); screens.line = gt.screen; }
   if (open) {
     const st = frameAt(uStart);
-    group.add(gantry(st, width, race.tour.accent));
+    const gt = buildGantry(st, width, race.tour.accent); group.add(gt.group); screens.start = gt.screen;
+    screens.line.set('FINISH', '#ff4d5e');
     group.add(roadStrip(curve, st.u, 0.6, width / 2 + 1, len, new THREE.MeshBasicMaterial({ color: 0xf2f2f2, side: THREE.DoubleSide })));
   }
 
@@ -377,7 +381,7 @@ export function buildTrack(race, script) {
   // Grandstands near the start and at two corners (a stage: start and finish)
   const standSpots = open ? [uAt(40), uAt(script.totalDist - 60)] : [0.985, 0.03, ...cornerUs(curve, 2, rand)];
   for (const u of standSpots) {
-    const stand = grandstand(curve, u, width, rand, clearOfTrack);
+    const stand = grandstand(curve, u, width, rand, clearOfTrack, race.tour.accent);
     if (stand) group.add(stand);
   }
 
@@ -398,12 +402,20 @@ export function buildTrack(race, script) {
       water.position.y = -2.5;
       group.add(water);
     }
-    group.add(props(theme.props, curve, width, rand, clearOfTrack));
+    group.add(dressLoop({ env: race.track.env, curve, width, rand, clearOfTrack }));
   }
 
   const corners = cinematicCorners(curve, frames, width, rand, open ? { uStart, uFinish, heightAt: terrain.heightAt } : null);
   for (const c of corners) c.dist = open ? d0 + c.u * len : c.u * len;
-  return { group, curve, frames, width, theme, corners, open, d0, len, uAt, heightAt: terrain ? terrain.heightAt : null, terrain };
+  // Per frame: the crowds' clock and the gantry screens. `text` is what the
+  // line's screen should say (a stage's line always says FINISH).
+  const tick = (t, text, color) => {
+    tickCrowds(t);
+    if (!open && text) screens.line.set(text, color);
+    screens.line.tick(t);
+    if (screens.start) screens.start.tick(t);
+  };
+  return { group, curve, frames, width, theme, corners, open, d0, len, uAt, heightAt: terrain ? terrain.heightAt : null, terrain, tick };
 }
 
 // A strip `length` metres long centred on curve parameter `u`, laid on the
@@ -460,42 +472,19 @@ function checkerTexture() {
   return checkerTex;
 }
 
-function gantry(frame, width, accent) {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshLambertMaterial({ color: 0x22252c });
-  const post = new THREE.BoxGeometry(0.8, 9, 0.8);
-  for (const side of [-1, 1]) {
-    const m = new THREE.Mesh(post, mat);
-    m.position.copy(frame.p).addScaledVector(frame.normal, side * (width / 2 + 2));
-    m.position.y += 4.5;
-    g.add(m);
-  }
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(width + 5, 1.6, 1.2), new THREE.MeshLambertMaterial({ color: accent }));
-  beam.position.copy(frame.p).y += 8.6;
-  beam.setRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), frame.normal));
-  g.add(beam);
-  return g;
-}
-
-function grandstand(curve, u, width, rand, clearOfTrack) {
+// A grandstand beside the road at curve parameter u, on whichever side its
+// whole footprint stays clear of the road (loops come back on themselves).
+function grandstand(curve, u, width, rand, clearOfTrack, accent) {
   const p = curve.getPointAt(u % 1);
   const t = curve.getTangentAt(u % 1);
   const n = new THREE.Vector3(-t.z, 0, t.x);
-  const g = new THREE.Group();
-  const len = 40 + rand() * 40;
-  const base = new THREE.Mesh(
-    new THREE.BoxGeometry(len, 7, 12),
-    new THREE.MeshLambertMaterial({ color: 0x39404d })
-  );
-  // Seat stripes: a canvas texture of colored dots reads as a crowd from afar.
-  const crowd = new THREE.Mesh(new THREE.PlaneGeometry(len, 12.6), new THREE.MeshBasicMaterial({ map: crowdTexture(rand) }));
+  const len = 44 + rand() * 40;
   let side = rand() > 0.5 ? 1 : -1;
-  const off0 = width / 2 + 14;
-  // Pick a side whose whole footprint stays off the road (loops come back).
+  const off0 = width / 2 + 9;
   const footprintClear = (sd) => {
     for (const along of [-len / 2, -len / 4, 0, len / 4, len / 2]) {
-      for (const across of [-6, 0, 6]) {
-        const c = p.clone().addScaledVector(n, sd * off0 + across).addScaledVector(t, along);
+      for (const across of [0, 4, 8]) {
+        const c = p.clone().addScaledVector(n, sd * (off0 + across)).addScaledVector(t, along);
         if (!clearOfTrack(c, width / 2 + 4)) return false;
       }
     }
@@ -505,69 +494,13 @@ function grandstand(curve, u, width, rand, clearOfTrack) {
     if (footprintClear(-side)) side = -side;
     else return null;
   }
-  const off = side * off0;
-  base.position.copy(p).addScaledVector(n, off).y += 3.5;
-  base.setRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), t));
-  g.add(base);
-  crowd.position.copy(base.position).addScaledVector(n, -side * 6.01);
-  crowd.setRotationFromQuaternion(base.quaternion);
-  crowd.rotateX(-0.5);
-  crowd.position.y = 7.4;
-  g.add(crowd);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(len, 0.5, 14), new THREE.MeshLambertMaterial({ color: 0xd8dce4 }));
-  roof.position.copy(base.position).y = 12;
-  roof.quaternion.copy(base.quaternion);
-  g.add(roof);
-  return g;
-}
-
-let crowdTexCache = null;
-function crowdTexture(rand) {
-  if (crowdTexCache) return crowdTexCache;
-  const c = document.createElement('canvas');
-  c.width = 256; c.height = 64;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#2b3140';
-  ctx.fillRect(0, 0, 256, 64);
-  const cols = ['#e8c05a', '#c0554d', '#5a86c9', '#67b06b', '#c9c9c9', '#9a67b0', '#e88a3a'];
-  for (let i = 0; i < 1400; i++) {
-    ctx.fillStyle = cols[Math.floor(rand() * cols.length)];
-    ctx.fillRect(Math.floor(rand() * 128) * 2, Math.floor(rand() * 32) * 2, 2, 2);
-  }
-  crowdTexCache = new THREE.CanvasTexture(c);
-  return crowdTexCache;
-}
-
-function props(kind, curve, width, rand, clearOfTrack) {
-  const g = new THREE.Group();
-  const count = 90;
-  const geoms = {
-    buildings: () => new THREE.BoxGeometry(14 + rand() * 20, 20 + rand() * 70, 14 + rand() * 20),
-    palms: () => new THREE.ConeGeometry(4, 10 + rand() * 6, 5),
-    cacti: () => new THREE.CylinderGeometry(0.8, 1, 4 + rand() * 4, 5),
-    pines: () => new THREE.ConeGeometry(3 + rand() * 2, 9 + rand() * 8, 6),
-    rocks: () => new THREE.DodecahedronGeometry(2 + rand() * 3),
-    peaks: () => new THREE.ConeGeometry(30 + rand() * 40, 60 + rand() * 90, 5),
-    trees: () => new THREE.SphereGeometry(3 + rand() * 3, 6, 5),
-  };
-  const colors = { buildings: 0x5d6b7d, palms: 0x3f7d46, cacti: 0x4d7d3f, pines: 0x2f5d3a, rocks: 0x7d7d80, peaks: 0x8593a3, trees: 0x4a7a3d };
-  const make = geoms[kind] || geoms.trees;
-  for (let i = 0; i < count; i++) {
-    const u = rand();
-    const p = curve.getPointAt(u);
-    const t = curve.getTangentAt(u);
-    const n = new THREE.Vector3(-t.z, 0, t.x);
-    const dist = (kind === 'peaks' ? 180 : 30) + rand() * (kind === 'buildings' ? 120 : 160);
-    const side = rand() > 0.5 ? 1 : -1;
-    const pos = p.clone().addScaledVector(n, side * (width / 2 + dist));
-    const clearance = kind === 'buildings' ? width / 2 + 26 : kind === 'peaks' ? width / 2 + 60 : width / 2 + 6;
-    if (!clearOfTrack(pos, clearance)) continue;
-    const mesh = new THREE.Mesh(make(), new THREE.MeshLambertMaterial({ color: colors[kind] || 0x4a7a3d }));
-    mesh.position.copy(pos);
-    mesh.position.y = mesh.geometry.parameters?.height ? mesh.geometry.parameters.height / 2 - 0.4 : 2;
-    g.add(mesh);
-  }
-  return g;
+  const stand = buildGrandstand(len, accent, rand);
+  // local +z is away from the track: point it along the outward normal
+  const away = n.clone().multiplyScalar(side);
+  stand.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), away);
+  stand.position.copy(p).addScaledVector(n, side * off0);
+  stand.position.y = p.y - 0.3;
+  return stand;
 }
 
 function cornerUs(curve, count, rand) {

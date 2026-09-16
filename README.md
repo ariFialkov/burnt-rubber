@@ -233,6 +233,28 @@ live: needles follow speed and revs, the gear steps with speed, the lap
 and fuel count down, warning lamps light for braking, rain and low fuel,
 and the formula wheel's shift lights fill with the revs and show DRS.
 
+**Trackside and scenery.** `src/three/trackside.js` builds the grandstands
+as one stepped concrete tier (an extruded profile) with seat strips, an
+advertising board, a back wall and a roof on columns, and fills them with a
+crowd: one InstancedMesh per stand of low-poly figures, coloured per
+instance and animated entirely in the vertex shader (a per-instance phase
+drives a bounce and an arm sway), so a thousand spectators are one draw
+call and no CPU work. The gantry over the line carries a dot-matrix LED
+screen (a canvas texture: text drawn small, read back and lit as dots,
+with a chasing border) that says START on the grid, the current lap, and
+FINISH on the last lap; a stage's start and finish gantries say START and
+FINISH. `src/three/flora.js` is the species library — spruce and fir with
+ruffled, drooping tiers for the rows of branches, oak and birch as clusters
+of deformed lobes, two bushes, desert scrub, a ribbed bulb cactus with
+L-shaped arms, a palm, stumps, logs, rocks, hay bales, fences, mountain
+peaks and street furniture — each one merged geometry with vertex colours,
+drawn instanced. `src/three/dressing.js` scatters them per environment
+around the loop circuits (forest, plains, coast, desert, tundra, mountain)
+and builds the city: textured facades with a window pitch, ground-floor
+bands, parapets, setback towers and roof plant, with streetlights, traffic
+lights, hydrants, mailboxes, benches, bollards and bins along the kerbs.
+The stages use the same species on their terrain.
+
 **Circuits.** The formula and bike layouts are grand-prix style rings
 (`GP` in `src/three/trackGen.js`): control points at uneven angles with
 radius swings for sweepers and esses, one or two pulled hard inward for

@@ -504,6 +504,15 @@ export class RaceScene {
     // dust, from where the tyre actually meets the road.
     if (mode === 'race') this.surface(dt, t);
     this.fx.update(dt);
+    // trackside: the crowds' clock and what the gantry says
+    if (this.track.tick) {
+      const laps = this.race.tour.laps;
+      const leadD = this.cars.length ? Math.max(...this.cars.map((c) => c.dist)) : 0;
+      const lap = clamp(Math.floor(leadD / this.script.lapLen) + 1, 1, laps);
+      const text = mode !== 'race' ? 'START' : script.finished(t) || lap >= laps ? 'FINISH' : `LAP ${lap}/${laps}`;
+      const color = text === 'START' ? '#2ee6a8' : text === 'FINISH' ? '#ff4d5e' : '#ffd12a';
+      this.track.tick(wallTime, text, color);
+    }
 
     if (mode === 'race') {
       this.spread = maxD - minD;
