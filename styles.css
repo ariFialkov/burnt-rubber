@@ -411,3 +411,34 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .fc-hint { margin-top: 12px; color: var(--dim); font-size: 0.68rem; }
 .live-top, .cam-bar, .popup-bet { z-index: 4; }
 .results { z-index: 5; }
+
+/* ---------- team bets ---------- */
+.team-row { align-items: center; }
+.team-swatch { display: flex; flex-direction: column; width: 14px; height: 44px; border-radius: 5px; overflow: hidden; border: 1px solid rgba(255,255,255,0.12); flex: none; }
+.team-swatch i { flex: 1; display: block; }
+.team-swatch i:nth-child(1) { background: var(--tb); }
+.team-swatch i:nth-child(2) { background: var(--tp); }
+.team-swatch i:nth-child(3) { background: var(--ts); }
+.team-row .pal { color: var(--tp); font-weight: 700; }
+.team-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.team-btns .odds-btn { min-width: 64px; padding: 6px 4px; }
+
+/* ---------- pit stop stopwatch ---------- */
+.pit-hud {
+  position: absolute; left: 50%; top: calc(64px + var(--sat, 0px)); transform: translateX(-50%);
+  width: min(380px, calc(100% - 24px)); text-align: center; pointer-events: none;
+  background: linear-gradient(160deg, rgba(10, 12, 18, 0.92), rgba(20, 22, 30, 0.88));
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 16px; padding: 10px 14px 12px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.6);
+  animation: pop-in 0.35s cubic-bezier(0.2, 1.2, 0.3, 1);
+}
+.ph-top { display: flex; justify-content: space-between; align-items: center; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; }
+.ph-team { padding: 3px 8px; border-radius: 6px; background: var(--tb); color: var(--ink, #111); border-left: 5px solid var(--tp); }
+.ph-phase { color: var(--gold); animation: pulse 1s infinite; }
+.ph-clock { font-size: 3.4rem; font-weight: 900; line-height: 1.1; margin: 4px 0 2px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; color: #fff; text-shadow: 0 0 18px rgba(255, 255, 255, 0.25); }
+.ph-clock small { font-size: 1.2rem; margin-left: 2px; color: var(--dim); }
+.ph-clock.over { color: var(--red); text-shadow: 0 0 18px rgba(255, 77, 94, 0.5); }
+.ph-clock.under { color: var(--green); text-shadow: 0 0 18px rgba(46, 230, 168, 0.5); }
+.ph-line { font-size: 0.74rem; font-weight: 700; color: var(--dim); letter-spacing: 0.06em; }
+.ph-line b.over { color: var(--red); } .ph-line b.under { color: var(--green); }
+.pb-accept.alt { background: var(--panel-2); color: var(--txt); border: 1px solid rgba(255, 209, 42, 0.5); }

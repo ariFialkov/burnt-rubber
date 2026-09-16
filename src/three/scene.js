@@ -8,6 +8,7 @@ import { buildCar, carLabel, positionBadge, COLLIDERS } from './carFactory.js';
 import { buildModelCar, modelMeta, shadowBlob, eyeFor, LAMP } from './models.js';
 import { buildCockpitKit, cockpitFor, updateInstruments } from './cockpit.js';
 import { SurfaceFX } from './effects.js';
+import { PitCrews } from './pits.js';
 import { getScript, getFocusLayer, GRID_OFFSET } from '../engine/script.js';
 
 const FWD = new THREE.Vector3(0, 0, 1);
@@ -167,6 +168,10 @@ export class RaceScene {
     this.backIdx = 0;
     this.centroid = new THREE.Vector3();
     this.spread = 0;
+    // The pit complex and its crews (loop tours).
+    this.pits = track.pit || null;
+    this.crews = this.pits && this.cars.length ? new PitCrews(this.scene, this.pits, race, this.cars[0].wheels.length) : null;
+    this.pitJobs = new Map(); // garage -> car index whose stop the crew is on
   }
 
   // Cockpit view looks out through the glazing, which is opaque — hide it on
@@ -267,8 +272,10 @@ export class RaceScene {
     const n = order.length;
     for (let a = 0; a < n; a++) {
       const i = order[a];
+      if (cars[i].pit?.inLane) continue;
       for (let k = 1; k < n; k++) {
         const j = order[(a + k) % n];
+        if (cars[j].pit?.inLane) continue;
         let ds = cars[j].trackPos - cars[i].trackPos;
         if (ds < 0) ds += lapLen;
         if (ds >= reach) break; // sorted, so everything further along is clear
@@ -427,11 +434,14 @@ export class RaceScene {
         car.laneFresh = true;
         car.jumped = true; // don't draw a mark from wherever it was to here
       } else {
-        const shown = live ? Math.max(scripted, car.shown + minStep) : scripted;
+        // in the pit lane the script's kinematics are the truth, stop included
+        const step = car.pit?.inLane ? 0 : minStep;
+        const shown = live ? Math.max(scripted, car.shown + step) : scripted;
         car.speed = Math.max(0, (shown - car.shown) / Math.max(dt, 1e-3));
         car.speedS += (car.speed - car.speedS) * 0.2;
         car.shown = shown;
       }
+      car.pit = mode === 'race' && this.pits ? script.pitState(i, t, this.adj) : null;
       const dist = car.shown;
       car.dist = dist;
       car.trackPos = this.trackPosOf(dist + car.lon);
@@ -443,6 +453,12 @@ export class RaceScene {
         const home = car.homeBase + Math.sin(s * Math.PI * 2 * car.homeDriftF + car.homeDriftP) * span * 0.25;
         const wander = Math.sin(s * Math.PI * 2 * car.laneF * 3 + car.laneP) * Math.min(1.1, this.col.width * 0.9);
         car.wantLane = clamp(home + wander, -span, span);
+        // heading for the pits: over to the inside edge; rejoining: from it
+        if (car.pit) {
+          const edgeLane = -this.pits.side * this.pits.edge;
+          if (!car.pit.inLane && car.pit.tw > car.pit.tEnter - 4 && car.pit.tw < car.pit.tEnter) car.wantLane = edgeLane;
+          if (car.pit.inLane) { car.lane = edgeLane; car.laneVel = 0; car.lon = 0; }
+        }
         // A scene picked up mid-race starts on its line rather than steering
         // over from the grid column; within the launch the column is right.
         if (car.laneFresh && t > 1.5) car.lane = car.wantLane;
@@ -481,11 +497,17 @@ export class RaceScene {
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i];
       const shown = car.dist + car.lon;
-      const u = this.track.uAt(shown);
-      const p = this.track.curve.getPointAt(u);
-      const tangent = this.track.curve.getTangentAt(u);
-      const nrm = new THREE.Vector3(-tangent.z, 0, tangent.x);
-      const pos = p.clone().addScaledVector(nrm, car.lane);
+      let p, tangent, pos;
+      if (car.pit?.inLane) {
+        const C = this.pits.carAt(car.pit.f, car.pit.boxF);
+        p = C.p; tangent = C.t; pos = C.p.clone();
+      } else {
+        const u = this.track.uAt(shown);
+        p = this.track.curve.getPointAt(u);
+        tangent = this.track.curve.getTangentAt(u);
+        const nrm = new THREE.Vector3(-tangent.z, 0, tangent.x);
+        pos = p.clone().addScaledVector(nrm, car.lane);
+      }
       car.groundY = p.y; // the road surface under the car, before any bounce
       if (mode === 'grid') pos.y += Math.sin(wallTime * 30 + i) * 0.015; // idle vibration
 
@@ -498,6 +520,28 @@ export class RaceScene {
       car.pos.copy(pos);
       car.tangent.copy(tangent);
       this.poseBody(car, tangent, mode, t, Math.min(dt, 0.05));
+    }
+
+    // Pit crews: hand each garage the stop that is due, then animate.
+    if (this.crews) {
+      if (mode === 'race') {
+        // One crew per garage, two cars per team: the crew serves the stop
+        // that is live (earliest box arrival first) and only then the
+        // team-mate's, so a double-stack hands over cleanly.
+        const due = new Map();
+        for (let i = 0; i < cars.length; i++) {
+          const ps = cars[i].pit;
+          if (!ps || ps.tw < ps.tBox - 3.4 || ps.tw > ps.tLeave + 5.6) continue;
+          const g = Math.floor(ps.boxIdx / 2);
+          const cur = due.get(g);
+          const live = ps.tw < ps.tLeave + 0.3, curLive = cur && cur.ps.tw < cur.ps.tLeave + 0.3;
+          if (!cur || (live && !curLive) || (live === curLive && (live ? ps.tBox < cur.ps.tBox : ps.tLeave > cur.ps.tLeave))) due.set(g, { i, ps });
+        }
+        for (const [g, { i, ps }] of due) {
+          if (this.pitJobs.get(g) !== i) { this.pitJobs.set(g, i); this.crews.setJob(g, this.pitJob(i, ps)); }
+        }
+      }
+      this.crews.update(t, dt);
     }
 
     // Surface effects: each rear wheel lays its track and throws up its
@@ -543,8 +587,9 @@ export class RaceScene {
 
     // Loads. Curvature of the road just ahead gives the cornering load;
     // the steering across the road and the change of pace add to it.
-    const u2 = this.track.uAt(car.dist + 8);
-    const tNext = this.track.curve.getTangentAt(u2);
+    const tNext = car.pit?.inLane
+      ? this.pits.laneAt(Math.min(1, car.pit.f + 8 / this.script.pit.span)).t
+      : this.track.curve.getTangentAt(this.track.uAt(car.dist + 8));
     // Positive when the road bends to the right (+X being the car's left).
     const turn = Math.atan2(tangent.x * tNext.z - tangent.z * tNext.x, tangent.dot(tNext));
     car.turnAhead = turn;
@@ -807,6 +852,22 @@ export class RaceScene {
       }
       car.jumped = false;
     }
+  }
+
+  // Where a car's wheels will be when it stops in its box, and where its
+  // crew should stand: a mechanic outboard of each wheel, the chief ahead.
+  pitJob(i, ps) {
+    const car = this.cars[i];
+    const C = this.pits.carAt(ps.boxF, ps.boxF);
+    const left = new THREE.Vector3(-C.t.z, 0, C.t.x); // the car's +X in the world
+    const wheels = [], lookAt = [], spots = [];
+    for (const w of car.wheels) {
+      const world = C.p.clone().addScaledVector(C.t, w.position.z).addScaledVector(left, w.position.x);
+      lookAt.push(world);
+      spots.push(world.clone().addScaledVector(left, Math.sign(w.position.x || 1) * 0.95).setY(C.p.y));
+    }
+    const chief = C.p.clone().addScaledVector(C.t, car.length / 2 + 1.9).addScaledVector(left, -this.pits.side * 0.9).setY(C.p.y);
+    return { carIdx: i, tArrive: ps.tBox, tLeave: ps.tLeave, wheels: spots, lookAt, chief, chiefLook: C.p.clone(), forward: C.t.clone() };
   }
 
   // Point sprites need the viewport to size themselves in metres.

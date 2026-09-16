@@ -44,6 +44,38 @@ export function markets(race) {
   }
   const smooth = (ct) => (ct + 1) / (MC_SAMPLES + 2);
 
+  // Team markets: the outfits with drivers in this race. Priced from the
+  // same draws — a team wins when either driver does, podiums when at least
+  // one is top three, doubles when both are, and "both top half" when the
+  // pair land in the top half together.
+  const teamIdx = new Map();
+  race.field.forEach((r, i) => { if (!teamIdx.has(r.team)) teamIdx.set(r.team, []); teamIdx.get(r.team).push(i); });
+  const teamCt = new Map([...teamIdx.keys()].map((t) => [t, { win: 0, podium: 0, double: 0, half: 0 }]));
+  {
+    const tRand = rngFor('mc-team-v1', race.key);
+    for (let s = 0; s < MC_SAMPLES; s++) {
+      const ord = sampleOrder(tRand, w);
+      const posOf = new Array(n); ord.forEach((i, k) => { posOf[i] = k; });
+      for (const [team, idx] of teamIdx) {
+        const ps = idx.map((i) => posOf[i]);
+        const c = teamCt.get(team);
+        if (ps.some((p) => p === 0)) c.win++;
+        if (ps.some((p) => p < 3)) c.podium++;
+        if (idx.length > 1 && ps.every((p) => p < 3)) c.double++;
+        if (ps.every((p) => p < n / 2)) c.half++;
+      }
+    }
+  }
+  const teams = [...teamIdx].map(([team, idx]) => {
+    const c = teamCt.get(team);
+    const pWinT = idx.reduce((a, i) => a + pWin[i], 0);
+    return {
+      team, drivers: idx.map((i) => race.field[i]), colors: race.field[idx[0]].colors, palette: race.field[idx[0]].palette,
+      pWin: pWinT, win: priced(pWinT), podium: priced(smooth(c.podium)),
+      double: idx.length > 1 ? priced(smooth(c.double)) : null, half: priced(smooth(c.half)),
+    };
+  }).sort((a, b) => b.pWin - a.pWin);
+
   const outrights = race.field.map((r, i) => ({
     racer: r, i,
     pWin: pWin[i],
@@ -81,7 +113,7 @@ export function markets(race) {
     marginUnder: priced(0.5),
   };
 
-  const m = { outrights, h2h, props, topN, pWin };
+  const m = { outrights, h2h, props, topN, pWin, teams };
   marketCache.set(race.key, m);
   return m;
 }

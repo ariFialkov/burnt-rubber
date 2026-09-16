@@ -20,6 +20,9 @@ export const MODEL_FILES = {
   moto: 'assets/models/moto.glb',
   rider: 'assets/models/rider.glb', // seated on every bike
   driver: 'assets/models/driver.glb', // the same figure, seated in every car
+  crew: 'assets/models/crew.glb',     // pit crew: standing...
+  stride: 'assets/models/stride.glb', // ...mid-stride...
+  kneel: 'assets/models/kneel.glb',   // ...and down on one knee at a wheel
 };
 
 const templates = new Map(); // vehicle -> { meta, parts: {role: geometry}, wheels: [{geometry, position, radius}] }
@@ -365,6 +368,32 @@ function buildFigure(t, mat, name) {
   root.userData.arms = t.meta.arms || null;
   return root;
 }
+
+// A pit crew member in the team's colours: the three poses stacked in one
+// group (only one shown at a time), each with its feet (or knee) on y = 0,
+// and their arm joints reachable by name. Height in metres.
+export function buildCrewFigure(colors, height = 1.72) {
+  const root = new THREE.Group();
+  root.name = 'crew';
+  const mat = hasLivery('rider') ? liveryMaterial('rider', colors) : new THREE.MeshStandardMaterial({ color: colors[1], metalness: 0.1, roughness: 0.7, envMap });
+  const poses = {};
+  for (const pose of ['crew', 'stride', 'kneel']) {
+    const t = templates.get(pose);
+    if (!t) continue;
+    const fig = buildFigure(t, mat, pose === 'crew' ? 'stand' : pose);
+    fig.scale.setScalar(height);
+    // lowest point of the posed body: stand it on the ground
+    let minY = 0;
+    for (const g of Object.values(t.parts)) { if (!g.boundingBox) g.computeBoundingBox(); minY = Math.min(minY, g.boundingBox.min.y); }
+    fig.position.y = -minY * height;
+    fig.visible = pose === 'crew';
+    poses[fig.name] = fig;
+    root.add(fig);
+  }
+  root.userData.poses = poses;
+  return root;
+}
+export const hasCrewFigures = () => templates.has('crew') && templates.has('stride') && templates.has('kneel');
 
 // Seat the driver so the head lands on the driver camera's eye point.
 export const DRIVER_HEIGHT = 1.72;

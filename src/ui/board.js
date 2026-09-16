@@ -11,6 +11,7 @@ const TABS = [
   { id: 'winner', label: '🏆 Winner' },
   { id: 'podium', label: '🥉 Podium' },
   { id: 'topn', label: 'Top Finish' },
+  { id: 'teams', label: '🏁 Teams' },
   { id: 'specials', label: '✨ Specials' },
 ];
 
@@ -94,6 +95,25 @@ export function updateBoard(ctx) {
       rows.push(racerRow(o,
         oddsBtn({ ...base, market: 'topN', n: m.topN, racerId: o.racer.id, odds: o.topN, label: `${o.racer.short} · Top ${m.topN}`, sub: raceLabel }, `TOP ${m.topN}`) +
         oddsBtn({ ...base, market: 'topHalf', racerId: o.racer.id, odds: o.topHalf, label: `${o.racer.short} · Top Half`, sub: raceLabel }, 'TOP ½')));
+    }
+  } else if (tab === 'teams') {
+    rows.push(`<div class="rr-meta" style="padding:10px 0 4px;font-weight:800;letter-spacing:.08em">TEAM BETS — either driver counts</div>`);
+    for (const tm of m.teams) {
+      const [pri, sec, base] = tm.colors;
+      rows.push(`
+        <div class="race-row team-row" style="--tp:${pri};--ts:${sec};--tb:${base || '#fff'}">
+          <div class="team-swatch"><i></i><i></i><i></i></div>
+          <div class="rr-info">
+            <div class="rr-name">${tm.team}</div>
+            <div class="rr-meta">${tm.drivers.map((d) => `${d.flag} #${d.number} ${d.short}`).join(' · ')}${tm.palette ? ` · <span class="pal">${tm.palette}</span>` : ''}</div>
+          </div>
+          <div class="team-btns">
+            ${oddsBtn({ ...base, market: 'teamWin', team: tm.team, odds: tm.win, label: `${tm.team} · Team win`, sub: raceLabel }, 'WIN')}
+            ${oddsBtn({ ...base, market: 'teamPodium', team: tm.team, odds: tm.podium, label: `${tm.team} · Team podium`, sub: raceLabel }, 'PODIUM')}
+            ${tm.double ? oddsBtn({ ...base, market: 'teamDouble', team: tm.team, odds: tm.double, label: `${tm.team} · Double podium`, sub: raceLabel }, '2× POD') : ''}
+            ${oddsBtn({ ...base, market: 'teamHalf', team: tm.team, odds: tm.half, label: `${tm.team} · Both top half`, sub: raceLabel }, 'BOTH ½')}
+          </div>
+        </div>`);
     }
   } else {
     rows.push(`<div class="rr-meta" style="padding:10px 0 4px;font-weight:800;letter-spacing:.08em">HEAD-TO-HEAD — who finishes ahead?</div>`);

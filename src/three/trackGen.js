@@ -7,6 +7,7 @@ import { rngFor, clamp, lerp } from '../core/rng.js';
 import { buildTerrain } from './terrain.js';
 import { buildGrandstand, buildGantry, tickCrowds } from './trackside.js';
 import { dressLoop } from './dressing.js';
+import { buildPits } from './pits.js';
 import { GRID_OFFSET } from '../engine/script.js';
 
 const ENV_THEMES = {
@@ -78,9 +79,19 @@ function gpLayout(rand, P) {
       radii[k] *= 0.8; radii[k + 1] *= 1.12; radii[k + 2] *= 0.8; claim(k, k + 2); break;
     }
   }
-  // straights: three or four neighbours set on one line (the tangent at the
-  // middle one), so the lap has somewhere to open up between the corners
-  for (let n = 0; n < P.straights; n++) {
+  // The pit straight: five neighbours around control point 0 on one line,
+  // so the start line sits mid-straight with room for the pit lane.
+  {
+    const am = angles[0], D = radii[0];
+    for (const j of [nPts - 2, nPts - 1, 0, 1, 2]) {
+      let a = angles[j] - am; a = ((a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+      radii[j] = D / Math.max(0.5, Math.cos(a));
+      used.add(j);
+    }
+  }
+  // more straights: three or four neighbours set on one line (the tangent at
+  // the middle one), so the lap has somewhere to open up between the corners
+  for (let n = 0; n < P.straights - 1; n++) {
     for (let tries = 0; tries < 30; tries++) {
       const span = 3 + Math.floor(rand() * 2);
       const k = 1 + Math.floor(rand() * (nPts - span - 1));
@@ -98,11 +109,14 @@ function controlPoints(style, rand, vehicle) {
   const pts = [];
   if (GP[vehicle]) return gpLayout(rand, GP[vehicle]);
   if (style === 'oval') {
-    const rx = 230 + rand() * 60, rz = 120 + rand() * 40;
-    for (let k = 0; k < 8; k++) {
-      const a = (k / 8) * Math.PI * 2;
-      pts.push(new THREE.Vector3(Math.cos(a) * rx, 0, Math.sin(a) * rz));
-    }
+    // A stadium: two straights joined by semicircles, the start mid-straight
+    // (which is where the pit lane goes). Scaled to the lap afterwards.
+    const Ls = 300 + rand() * 60, rz = 85 + rand() * 25;
+    pts.push(new THREE.Vector3(0, 0, rz), new THREE.Vector3(Ls / 4, 0, rz), new THREE.Vector3(Ls / 2, 0, rz));
+    for (const th of [Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4]) pts.push(new THREE.Vector3(Ls / 2 + rz * Math.sin(th), 0, rz * Math.cos(th)));
+    pts.push(new THREE.Vector3(Ls / 4, 0, -rz), new THREE.Vector3(0, 0, -rz), new THREE.Vector3(-Ls / 4, 0, -rz), new THREE.Vector3(-Ls / 2, 0, -rz));
+    for (const th of [Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4]) pts.push(new THREE.Vector3(-Ls / 2 - rz * Math.sin(th), 0, -rz * Math.cos(th)));
+    pts.push(new THREE.Vector3(-Ls / 4, 0, rz));
   } else {
     const nPts = style === 'baja' ? 11 : 12 + Math.floor(rand() * 4);
     const base = style === 'baja' ? 320 : style === 'rally' ? 250 : 220;
@@ -218,7 +232,7 @@ function buildStage(race, script, style, width, rand, theme) {
   const pre = GRID_OFFSET + n * script.pitch + 40;           // grid straight before the line
   // run-off past the flying finish: the live view runs to the end of the
   // race window, and the leader keeps its pace all the way
-  const post = script.pace.cruise * (script.raceS - script.T + 1) + 80;
+  const post = script.runOff;
   const need = pre + script.totalDist + post;
   const zones = makeZones(style, need, rand);
   const pts = walkRoute(style, need, zones, rand, style === 'rally' ? 110 : 170);
@@ -368,14 +382,22 @@ export function buildTrack(race, script) {
     group.add(roadStrip(curve, st.u, 0.6, width / 2 + 1, len, new THREE.MeshBasicMaterial({ color: 0xf2f2f2, side: THREE.DoubleSide })));
   }
 
-  // Keep props and stands off every part of the looping road.
+  // The pit complex (loop tours): the lane off the start straight, garages
+  // and control centres on the infield side.
+  let pits = null;
+  if (!open && script.pit) {
+    pits = buildPits({ curve, width, uAt, frames }, script, race, rand);
+    group.add(pits.group);
+  }
+
+  // Keep props and stands off every part of the looping road — and the pits.
   const clearOfTrack = (p, margin) => {
     for (let k = 0; k < frames.length; k += 6) {
       const f = frames[k].p;
       const dx = p.x - f.x, dz = p.z - f.z;
       if (dx * dx + dz * dz < margin * margin) return false;
     }
-    return true;
+    return !pits || pits.clearOfPits(p, margin);
   };
 
   // Grandstands near the start and at two corners (a stage: start and finish)
@@ -415,7 +437,7 @@ export function buildTrack(race, script) {
     screens.line.tick(t);
     if (screens.start) screens.start.tick(t);
   };
-  return { group, curve, frames, width, theme, corners, open, d0, len, uAt, heightAt: terrain ? terrain.heightAt : null, terrain, tick };
+  return { group, curve, frames, width, theme, corners, open, d0, len, uAt, heightAt: terrain ? terrain.heightAt : null, terrain, tick, pit: pits };
 }
 
 // A strip `length` metres long centred on curve parameter `u`, laid on the

@@ -127,6 +127,7 @@ function initPicking(ctx) {
 }
 
 function setCam(mode) {
+  if (ui?.pitCam && mode !== 'pit') endPitScene(true); // the viewer took the camera back
   ctxRef.rig.setMode(mode, ctxRef.selectedCarIdx);
   document.querySelectorAll('.cam-chip').forEach((b) => b.classList.toggle('active', b.dataset.cam === mode));
   $('car-select').style.visibility = ['chase', 'cockpit', 'hood'].includes(mode) ? 'visible' : 'hidden';
@@ -160,17 +161,21 @@ function onPopupClick(e) {
     dismissPopup();
     return;
   }
-  if (e.target.closest('.pb-accept')) {
+  const accept = e.target.closest('.pb-accept');
+  if (accept) {
     const a = ui.active;
     const race = st.race;
+    const side = accept.dataset.side || null;
+    const odds = side === 'under' ? a.oddsUnder : a.odds;
+    const label = side ? `${race.field[a.popup.focusIdx].short} pit stop ${side.toUpperCase()} ${a.popup.line.toFixed(1)}s` : a.text;
     const bet = placeBet([{
       tourId: race.tourId, cycle: race.cycle, market: 'popup',
-      popupId: a.popup.id, focusIdx: a.popup.focusIdx,
+      popupId: a.popup.id, focusIdx: a.popup.focusIdx, side,
       racerId: race.field[a.popup.focusIdx].id,
-      odds: a.odds, label: a.text, sub: `${race.tour.name} · in-race`,
+      odds, label, sub: `${race.tour.name} · in-race`,
     }], a.stake);
     if (bet) {
-      ctxRef.toast(`Live bet on! ${fmtOdds(a.odds)} 🎟️`, 'win');
+      ctxRef.toast(`Live bet on! ${fmtOdds(odds)} 🎟️`, 'win');
       ctxRef.updateWallet();
     } else {
       ctxRef.toast('Not enough credits', 'lose');
@@ -202,8 +207,11 @@ function renderPopup(st) {
     <div class="pb-row">${[50, 100, 250].map((v) =>
       `<button class="stake-opt${a.stake === v ? ' sel' : ''}" data-pstake="${v}">${v} ◈</button>`).join('')}</div>
     <div class="pb-actions">
-      <button class="pb-accept">BET ${a.stake} ◈ → ${Math.round(a.stake * a.odds).toLocaleString()} ◈</button>
-      <button class="pb-cam">📺 Best cam</button>
+      ${a.popup.sides
+        ? `<button class="pb-accept" data-side="over">OVER ${a.popup.line.toFixed(1)}s @ ${fmtOdds(a.odds)}</button>
+           <button class="pb-accept alt" data-side="under">UNDER @ ${fmtOdds(a.oddsUnder)}</button>`
+        : `<button class="pb-accept">BET ${a.stake} ◈ → ${Math.round(a.stake * a.odds).toLocaleString()} ◈</button>
+           <button class="pb-cam">📺 Best cam</button>`}
     </div>`;
   $('popup-bet').classList.remove('hidden');
 }
@@ -225,6 +233,7 @@ export function enterLive(ctx) {
   $('results').classList.add('hidden');
   $('popup-bet').classList.add('hidden');
   $('finish-card').classList.add('hidden');
+  $('pit-hud').classList.add('hidden');
   setCam(st.phase === 'racing' ? 'chopper' : 'chopper');
 }
 
@@ -267,7 +276,8 @@ export function updateLive(ctx) {
     detectEvents(ctx, st, script, focusIdx);
     handlePopups(ctx, st, script, focusIdx);
     if (ui.active) tickPopup(st);
-  }
+    updatePitScene(ctx, st, script, focusIdx);
+  } else if (ui.pitCam) endPitScene(false);
 
   updateFinishCard(ctx, st, script);
 
@@ -424,6 +434,7 @@ function handlePopups(ctx, st, script, focusIdx) {
         popup: pu,
         text: pu.text(focus, target),
         odds: Math.max(1.05, RTP / pu.p),
+        oddsUnder: pu.sides ? Math.max(1.05, RTP / Math.max(0.02, 1 - pu.p)) : null,
         stake: 100,
         deadlineT: closeT,
       };
@@ -431,6 +442,61 @@ function handlePopups(ctx, st, script, focusIdx) {
       break;
     }
   }
+}
+
+// The focus car's pit stop as a cutscene: the camera goes to the pit shot
+// list and a stopwatch takes the screen, from a couple of seconds before
+// the lane to a moment after the car rejoins.
+function updatePitScene(ctx, st, script, focusIdx) {
+  const race = st.race;
+  if (!script.pit) return;
+  const scene = ctx.currentScene;
+  const ps = script.pitState(focusIdx, st.tRace, scene?.adj ?? null);
+  if (!ps) return;
+  const on = ps.tw >= ps.tEnter - 2.2 && ps.tw <= ps.tExit + 1.0;
+  if (!on) { if (ui.pitCam) endPitScene(false); return; }
+  if (ui.pitSkipped === ps.tEnter) return;
+  if (!ui.pitCam) {
+    ui.pitCam = { prevMode: ctx.rig.mode, prevCar: ctx.selectedCarIdx };
+    ctx.selectedCarIdx = focusIdx;
+    ctx.rig.pitPhase = null;
+    ctx.rig.setMode('pit', focusIdx);
+    document.querySelectorAll('.cam-chip').forEach((b) => b.classList.remove('active'));
+    $('pit-hud').classList.remove('hidden');
+  }
+  const r = race.field[focusIdx];
+  const line = script.pit.line;
+  const myLeg = store.bets.find((b) => b.status === 'open' && b.legs.some((l) => l.popupId === `${race.key}@${focusIdx}#pit`))?.legs.find((l) => l.popupId === `${race.key}@${focusIdx}#pit`);
+  const stopT = ps.tw < ps.tBox ? 0 : Math.min(ps.tw - ps.tBox, ps.D);
+  const done = ps.tw >= ps.tLeave;
+  const phase = ps.tw < ps.tEnter ? 'PIT ENTRY' : ps.tw < ps.tBox ? 'IN THE LANE' : !done ? 'STATIONARY' : ps.tw < ps.tExit ? 'GO GO GO' : 'REJOINING';
+  const over = stopT > line;
+  const cls = ps.tw < ps.tBox ? '' : over ? 'over' : done ? 'under' : '';
+  $('pit-hud').innerHTML = `
+    <div class="ph-top"><span class="ph-team" style="--tp:${r.colors[0]};--tb:${r.colors[2] || '#fff'};--ink:${inkFor(r.colors[2] || '#fff')}">#${r.number} ${r.short} · ${r.team}</span><span class="ph-phase">${phase}</span></div>
+    <div class="ph-clock ${cls}">${stopT.toFixed(2)}<small>s</small></div>
+    <div class="ph-line">LINE ${line.toFixed(1)}s${myLeg ? ` · YOUR BET: <b>${myLeg.side ? myLeg.side.toUpperCase() : 'OVER'}</b>` : ''}${done ? ` · <b class="${cls}">${over ? 'OVER' : 'UNDER'}</b>` : ''}</div>`;
+}
+// Dark or light lettering for a swatch, by its luminance.
+function inkFor(hex) {
+  const n = parseInt(String(hex).replace('#', '').padEnd(6, '0').slice(0, 6), 16);
+  const l = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+  return l > 0.55 ? '#111' : '#f4f4f4';
+}
+function endPitScene(skipped) {
+  if (!ui?.pitCam) return;
+  const { prevMode, prevCar } = ui.pitCam;
+  ui.pitCam = null;
+  if (skipped) {
+    const st = tourState(ctxRef.liveTourId);
+    const ps = getScript(st.race).pitState(focusRacerIdx(st.race), st.tRace, ctxRef.currentScene?.adj ?? null);
+    ui.pitSkipped = ps ? ps.tEnter : true;
+  } else {
+    ctxRef.selectedCarIdx = prevCar;
+    ctxRef.rig.setMode(prevMode, prevCar);
+    document.querySelectorAll('.cam-chip').forEach((b) => b.classList.toggle('active', b.dataset.cam === prevMode));
+  }
+  $('pit-hud').classList.add('hidden');
 }
 
 function showResults(ctx, race, script) {

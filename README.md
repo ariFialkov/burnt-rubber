@@ -73,11 +73,18 @@ live races at the same moment, with no server.
 
 - **Pre-race**: winner, podium, top-N, top-half, head-to-heads, holeshot
   (leads lap 1), fastest lap, winning-margin over/under.
+- **Team bets**: every outfit enters both its cars, and the Teams tab prices
+  the pair as one — team win, team podium, double podium, both in the top
+  half — from the same Monte Carlo the racer markets come from, with the
+  team's palette as a swatch so the colours mean the same thing on the
+  board and on the track.
 - **Parlays**: legs from different races (any tours) multiply into one ticket.
 - **In-race popup bets**: while spectating, live props about "your" racer pop
   up — *overtake the car ahead on this straight*, *reach P3 in the next 9s*,
   *hold position* — each with a button that cuts to the best camera to watch
-  it land.
+  it land. On the loop tours your racer's pit stop is one too: *stop time
+  over 2.5s?*, with an OVER and an UNDER button priced off the same stop
+  distribution the stop is drawn from.
 - **Sponsorship (Garage)**: pay a one-time fee to own a racer; winning WIN
   bets on them pay +25% winnings. Sell back anytime for 25% of the fee.
 - **Hub**: the five tours sit along the bottom of the hub, each with its
@@ -105,6 +112,32 @@ A race is decided the moment betting opens; what stays alive is the
 choreography. Gap curves with per-racer "drama harmonics" (inconsistent
 racers swing harder) produce overtakes and swings all race while converging
 exactly to the scripted finish.
+
+**Pit stops.** The formula, stock and bike tours run a pit lap: every car
+comes in once, on the lap before the last, through a lane that peels off
+the inside of the start straight. The virtual pace car itself crawls
+through the lane at a speed that costs it exactly the mean stop, so the
+scripted gaps hold across the lap; each car then drives the lane on its own
+kinematics (`PIT` in `src/engine/script.js`): brakes to a standstill in its
+team's box for a stop drawn log-normally around the class median, launches,
+and rejoins — and whatever its stop cost against the mean it earns back
+smoothly before the lane, so it leaves on its scripted gap with nothing to
+claw back (any remainder beyond a cap fades out after). Standings are by
+distance, so a car sitting in its box loses places to the field until they
+pit too. The complex (`src/three/pits.js`) is built from the track's own
+frames: lane surface with the fast-lane line and box markings, a pit wall
+with a stand on it, a garage per team with its header, sign and kit, and a
+control centre behind each with window bands, a dish and masts. A crew per
+garage — mechanics for every wheel and a chief, rider-mesh figures baked in
+standing, striding and kneeling frames — runs out as the car brakes in,
+kneels on the guns, steps back, waves it away and walks home; the crew
+serves the team's stops in order, so a double-stack hands over without a
+teleport. Your racer's stop is a cutscene: the camera goes to a shot list
+(the lane mouth from the wall, a low chase down the lane, the garage's own
+view as the car brakes in, a slow orbit over the box, a wheel close-up
+through the launch, a pan from the wall, the exit) with a stopwatch on the
+screen against the line, and hands back to the camera you were on; pick a
+camera chip during it to skip.
 
 **Pacing.** Every gap is measured against a virtual pace car with a
 per-class profile — launch acceleration and cruising speed
@@ -336,7 +369,7 @@ src/engine/schedule.js      the world clock: endless staggered race cycles
 src/engine/odds.js          RTP pricing (Plackett–Luce + seeded Monte Carlo)
 src/engine/script.js        race scripts: outcomes, drama curves, popup director
 src/engine/bets.js          wallet, slip, sponsorships, deterministic settlement
-src/three/                  procedural tracks, car models, scene, cameras
+src/three/                  procedural tracks, pits and crews, car models, scene, cameras
 assets/models/              game-ready GLBs; assets/fbx-src/ the sources
 tools/                      build, single-file bundle, FBX -> GLB pipeline
 src/ui/                     hub, bet board, live HUD, garage, bet slip, portraits

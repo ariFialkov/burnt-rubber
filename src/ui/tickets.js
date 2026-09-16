@@ -54,11 +54,18 @@ function legChip(leg, now) {
   if (leg.market === 'popup') {
     return `<span class="tk-chip live">${tag} ⚡ in play</span>`;
   }
+  const order = script.standings(s, adj);
+  if (leg.team) {
+    // a team leg: where its best-placed driver is running
+    const ps = race.field.map((r, i) => (r.team === leg.team ? order.indexOf(i) + 1 : 0)).filter(Boolean).sort((a, b) => a - b);
+    const best = ps[0] || 0;
+    const good = leg.market === 'teamWin' ? best === 1 : leg.market === 'teamPodium' ? best <= 3 : leg.market === 'teamDouble' ? ps.length > 1 && ps[1] <= 3 : ps.every((p) => p <= race.field.length / 2);
+    return `<span class="tk-chip ${good ? 'ok' : 'bad'}">${tag} ● P${ps.join('/P')} · lap ${lap}</span>`;
+  }
   const idx = leg.racerId ? race.field.findIndex((r) => r.id === leg.racerId) : -1;
   if (idx < 0) {
     return `<span class="tk-chip live">${tag} ● live · lap ${lap}</span>`;
   }
-  const order = script.standings(s, adj);
   const p = order.indexOf(idx) + 1;
   let good = null;
   switch (leg.market) {

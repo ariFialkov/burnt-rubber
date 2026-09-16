@@ -404,7 +404,22 @@
         lean: 0.15, head: 0.05, thigh: 1.45, shin: 0.9, splay: 0.03,
         upper: 1.3, out: 0.12, fore: 0.3, yaw: 0.05,
       },
+      // Pit crew, three frames: standing, mid-stride (legs split), and down
+      // on one knee. Leg angles may differ per side ({l, r}).
+      crew: {
+        lean: 0.0, head: 0.0, thigh: 0.0, shin: 0.0, splay: 0.0,
+        upper: 0.12, out: 0.1, fore: 0.35, yaw: 0.0,
+      },
+      stride: {
+        lean: 0.12, head: 0.0, thigh: { l: 0.7, r: -0.55 }, shin: { l: 0.25, r: 1.0 }, splay: 0.0,
+        upper: { l: -0.6, r: 0.6 }, out: 0.1, fore: 0.9, yaw: 0.0,
+      },
+      kneel: {
+        lean: 0.2, head: -0.15, thigh: { l: 1.5, r: 0.05 }, shin: { l: 1.5, r: 1.55 }, splay: 0.05,
+        upper: 0.9, out: 0.15, fore: 1.0, yaw: 0.1,
+      },
     };
+    const perSide = (v, side) => (typeof v === 'number' ? v : side > 0 ? v.l : v.r);
     const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     const rotAbout = (v, pivot, axis, angle) => { v.sub(pivot).applyAxisAngle(axis, angle).add(pivot); };
     const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
@@ -420,18 +435,29 @@
     const head = new THREE.Vector3(); let headN = 0;
     const hands = new THREE.Vector3(); let handsN = 0;
     const handL = new THREE.Vector3(), handR = new THREE.Vector3(); let handLN = 0, handRN = 0;
+    // Parts are decided per triangle (by its centroid), never per vertex:
+    // the A-pose hands hang beside the thighs, and a triangle straddling
+    // that seam would otherwise be torn into a shard when the arm swings.
+    const triArm = new Uint8Array(pos.count / 3), triLeg = new Uint8Array(pos.count / 3), triSide = new Int8Array(pos.count / 3);
+    for (let tri = 0; tri < pos.count / 3; tri++) {
+      const cx = (pos.getX(tri * 3) + pos.getX(tri * 3 + 1) + pos.getX(tri * 3 + 2)) / 3;
+      const cy = (pos.getY(tri * 3) + pos.getY(tri * 3 + 1) + pos.getY(tri * 3 + 2)) / 3;
+      triArm[tri] = cy > 0.36 && cy < 0.86 && Math.abs(cx) > (cy < 0.5 ? 0.115 : 0.105) ? 1 : 0;
+      triLeg[tri] = cy < J.hip + 0.02 && !triArm[tri] ? 1 : 0;
+      triSide[tri] = Math.sign(cx) || 1;
+    }
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
       const x0 = v.x, y0 = v.y;
-      const isArm = y0 > 0.36 && y0 < 0.86 && Math.abs(x0) > 0.105;
-      const isLeg = y0 < J.hip + 0.02 && !isArm;
-      const side = Math.sign(x0) || 1;
+      const isArm = !!triArm[Math.floor(i / 3)];
+      const isLeg = !!triLeg[Math.floor(i / 3)];
+      const side = triSide[Math.floor(i / 3)];
       if (isLeg) {
         // shin first (about the knee), then the whole leg about the hip
         const wShin = 1 - smooth(J.knee - 0.03, J.knee + 0.03, y0);
-        if (wShin > 0) rotAbout(v, new THREE.Vector3(side * J.legX, J.knee, 0), X, A.shin * wShin);
+        if (wShin > 0) rotAbout(v, new THREE.Vector3(side * J.legX, J.knee, 0), X, perSide(A.shin, side) * wShin);
         const wThigh = 1 - smooth(J.hip - 0.03, J.hip + 0.02, y0);
-        rotAbout(v, new THREE.Vector3(side * J.legX, J.hip, 0), X, -A.thigh * wThigh);
+        rotAbout(v, new THREE.Vector3(side * J.legX, J.hip, 0), X, -perSide(A.thigh, side) * wThigh);
         v.x += side * A.splay * wThigh;
       } else {
         if (y0 > J.neck - 0.02) {
@@ -449,7 +475,7 @@
             rotAbout(v, elbow, Y, -side * A.yaw * wFore);
           }
           const wArm = 1 - smooth(J.shoulder - 0.02, J.shoulder + 0.04, y0);
-          rotAbout(v, shoulder, X, -A.upper * wArm);
+          rotAbout(v, shoulder, X, -perSide(A.upper, side) * wArm);
           rotAbout(v, shoulder, Z, side * A.out * wArm);
         }
         // Everything above the hips leans into the tank. The arms hang from
@@ -470,7 +496,7 @@
     const jointsFor = (side) => {
       const shoulder = new THREE.Vector3(side * J.shoulderX, J.shoulder, 0);
       const elbow = new THREE.Vector3(side * J.elbowX, J.elbow, 0);
-      rotAbout(elbow, shoulder.clone(), X, -A.upper);
+      rotAbout(elbow, shoulder.clone(), X, -perSide(A.upper, side));
       rotAbout(elbow, shoulder.clone(), Z, side * A.out);
       for (const p of [shoulder, elbow]) rotAbout(p, new THREE.Vector3(0, J.hip, 0), X, A.lean);
       const hand = (side > 0 ? handL.clone().divideScalar(Math.max(1, handLN)) : handR.clone().divideScalar(Math.max(1, handRN)));

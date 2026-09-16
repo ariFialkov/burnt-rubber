@@ -2,7 +2,7 @@
 // the freshly deployed build, offline the cached copy plays fully (the whole
 // game is static and deterministic — races run off the world clock).
 
-const CACHE = 'burnt-rubber-v18';
+const CACHE = 'burnt-rubber-v19';
 const ASSETS = [
   '.',
   'index.html',
@@ -25,6 +25,7 @@ const ASSETS = [
   'src/three/trackside.js',
   'src/three/dressing.js',
   'src/three/terrain.js',
+  'src/three/pits.js',
   'src/three/trackGen.js',
   'src/three/carFactory.js',
   'src/three/scene.js',
@@ -51,6 +52,9 @@ const ASSETS = [
   'assets/models/moto.glb',
   'assets/models/rider.glb',
   'assets/models/driver.glb',
+  'assets/models/crew.glb',
+  'assets/models/stride.glb',
+  'assets/models/kneel.glb',
   'assets/liveries/index.json',
   'assets/liveries/formula.jpg',
   'assets/liveries/formula_normal.jpg',

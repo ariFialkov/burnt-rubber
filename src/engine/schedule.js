@@ -8,10 +8,10 @@ import { RACER_BANKS } from '../data/racers.js';
 
 export const EPOCH0 = Date.UTC(2026, 0, 1); // world time zero
 export const BET_S = 72;   // betting window
-export const RACE_S = 68;  // the longest race (~52s) plus the tail of a 40-truck field
+export const RACE_S = 86;  // the longest race (~70s with its pit lap) plus the tail of a 40-truck field
 export const POST_S = 15;  // results / cooldown
-export const CYCLE_S = BET_S + RACE_S + POST_S; // 155s
-const STAGGER_S = 31;      // tour offsets: a race goes green every ~31s somewhere
+export const CYCLE_S = BET_S + RACE_S + POST_S; // 173s
+const STAGGER_S = 35;      // tour offsets: a race goes green every ~35s somewhere
 
 const PURSES = [120, 180, 250, 400, 600, 750, 1000]; // display "purse" in K
 
@@ -32,8 +32,15 @@ export function raceFor(tourId, cycle) {
   const seasonOrder = shuffled(rngFor('season-v1', tourId, String(season)), tour.tracks);
   const track = seasonOrder[((cycle % tour.tracks.length) + tour.tracks.length) % tour.tracks.length];
 
-  // Field: fieldSize racers drawn from the 4x bank.
-  const field = shuffled(rand, bank).slice(0, tour.fieldSize);
+  // Field: fieldSize racers drawn from the 4x bank, whole teams at a time
+  // (an outfit enters both its cars), the pairs then shuffled into the
+  // line-up. An odd field size gets one lone entry.
+  const byTeam = new Map();
+  for (const r of bank) { if (!byTeam.has(r.team)) byTeam.set(r.team, []); byTeam.get(r.team).push(r); }
+  const teamsIn = shuffled(rand, [...byTeam.values()]);
+  const picked = [];
+  for (const members of teamsIn) { if (picked.length >= tour.fieldSize) break; for (const r of members) if (picked.length < tour.fieldSize) picked.push(r); }
+  const field = shuffled(rand, picked);
 
   // Per-race form: strength jittered so the same racer isn't priced
   // identically every time out.

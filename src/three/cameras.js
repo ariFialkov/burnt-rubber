@@ -80,6 +80,9 @@ export class CameraRig {
       const d = pos.distanceTo(look);
       fov = clamp(2600 / Math.max(d, 1), 20, 58);
       stiff = 5; // slow pan like a mounted operator
+    } else if (this.mode === 'pit' && rs.pits && car.pit) {
+      ({ pos, look, fov } = this.pitShot(rs, car));
+      stiff = 40;
     } else { // chopper
       this.orbitA += dt * 0.06;
       const alt = clamp(26 + rs.spread * 0.45, 32, 170);
@@ -95,7 +98,7 @@ export class CameraRig {
     const kl = this.snap ? 1 : 1 - Math.exp(-Math.max(stiff, 6) * dt);
     // The cine cam is bolted down, and the onboard mounts are rigid: any lag
     // there would leave the camera trailing metres behind the car at speed.
-    const rigid = this.mode === 'cine' || this.mode === 'cockpit' || this.mode === 'hood';
+    const rigid = this.mode === 'cine' || this.mode === 'cockpit' || this.mode === 'hood' || this.mode === 'pit';
     cam.position.lerp(pos, rigid ? 1 : k);
     this.smoothLook.lerp(look, kl);
     cam.lookAt(this.smoothLook);
@@ -107,6 +110,74 @@ export class CameraRig {
     cam.far = this.mode === 'cockpit' ? 2500 : 6000;
     cam.updateProjectionMatrix();
     this.snap = false;
+  }
+
+  // The pit stop, as a broadcast would cut it: trackside as the car peels
+  // off, following it down the lane, the garage's view as it arrives, a slow
+  // overhead orbit while the crew works, a low wheel close-up, the launch
+  // from ahead, and the exit. Cuts on phase changes.
+  pitShot(rs, car) {
+    const P = rs.pits, ps = car.pit;
+    const tw = ps.tw;
+    const box = P.carAt(ps.boxF, ps.boxF);
+    const carPos = car.pos, len = car.length || 4.5;
+    const D = ps.D;
+    // a long lens on the fixed cameras: the car fills the frame at any range
+    const longLens = (from, at, fill = 7) => clamp((2 * Math.atan(fill / Math.max(1, from.distanceTo(at))) * 180) / Math.PI, 12, 60);
+    let phase, pos, look, fov = 55;
+    if (tw < ps.tEnter + 0.9) {
+      // fixed on the pit wall at the lane mouth, panning with the car as it peels off
+      phase = 'entry';
+      const L = P.laneAt(0.2);
+      pos = L.p.clone().addScaledVector(L.n, -3.6).addScaledVector(L.t, 2).add(new THREE.Vector3(0, 2.6, 0));
+      look = carPos.clone().add(new THREE.Vector3(0, 0.6, 0)); fov = longLens(pos, look, 9);
+    } else if (tw < ps.tBox - rs.script.pit.brake - 0.15) {
+      // low chase down the lane
+      phase = 'lane';
+      pos = carPos.clone().addScaledVector(car.tangent, -7.5).add(new THREE.Vector3(0, 2.0, 0)).addScaledVector(box.n, -1.2);
+      look = carPos.clone().addScaledVector(car.tangent, 9).add(new THREE.Vector3(0, 0.5, 0)); fov = 60;
+    } else if (tw < ps.tBox + 0.32 * D) {
+      // from the back of the garage, over the crew's heads, as the car pulls in
+      phase = 'garage';
+      const g = P.garages[Math.floor(ps.boxIdx / 2)];
+      pos = g.center.clone().addScaledVector(g.n, g.front + g.GD - 1.6).addScaledVector(g.t, ps.boxIdx % 2 ? 1.2 : -1.2).add(new THREE.Vector3(0, 2.9, 0));
+      look = box.p.clone().lerp(carPos, 0.25).add(new THREE.Vector3(0, 0.5, 0)); fov = 66;
+    } else if (tw < ps.tBox + 0.7 * D) {
+      // a slow orbit above the box while the guns run
+      phase = 'overhead';
+      const a0 = Math.atan2(-box.n.z, -box.n.x);
+      const a = a0 + 0.6 + 0.16 * (tw - ps.tBox);
+      pos = box.p.clone().add(new THREE.Vector3(Math.cos(a) * 7.2, 4.4, Math.sin(a) * 7.2));
+      look = box.p.clone().add(new THREE.Vector3(0, 0.7, 0)); fov = 50;
+    } else if (tw < ps.tLeave + 0.35) {
+      // down at the lane-side front wheel: the gun, the mechanic, then the launch
+      phase = 'wheel';
+      let wheel = null, best = Infinity;
+      for (const w of car.wheels || []) {
+        const wp = w.getWorldPosition(new THREE.Vector3());
+        const score = wp.clone().sub(box.p).dot(box.n) - 0.3 * wp.clone().sub(box.p).dot(box.t);
+        if (score < best) { best = score; wheel = wp; }
+      }
+      wheel = wheel || box.p.clone();
+      pos = wheel.clone().addScaledVector(box.n, -1.5).addScaledVector(box.t, 2.6).add(new THREE.Vector3(0, 0.75, 0));
+      // never back into the pit wall: stay inside the lane's far half
+      const L = P.laneAt(ps.boxF), across = pos.clone().sub(L.p).dot(L.n), limit = -2.6;
+      if (across < limit) pos.addScaledVector(L.n, limit - across);
+      look = wheel.clone().add(new THREE.Vector3(0, 0.3, 0)); fov = 46;
+    } else if (tw < ps.tLeave + 2.6) {
+      // from the pit wall opposite the box, panning as the car pulls away
+      phase = 'launch';
+      pos = box.p.clone().addScaledVector(box.t, 3).addScaledVector(box.n, -6.2).add(new THREE.Vector3(0, 1.7, 0));
+      look = carPos.clone().add(new THREE.Vector3(0, 0.5, 0)); fov = longLens(pos, look, 7);
+    } else {
+      // fixed beside the lane exit, the car flying past and out onto the track
+      phase = 'exit';
+      const L = P.laneAt(0.97);
+      pos = L.p.clone().addScaledVector(L.n, 5.6).add(new THREE.Vector3(0, 2.2, 0));
+      look = carPos.clone().add(new THREE.Vector3(0, 0.6, 0)); fov = longLens(pos, look, 7);
+    }
+    if (phase !== this.pitPhase) { this.pitPhase = phase; this.snap = true; }
+    return { pos, look, fov };
   }
 
   // Sequential corner cams: hold on a corner until the whole pack is through,

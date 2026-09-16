@@ -109,7 +109,16 @@ function legResult(leg) {
     case 'popup': {
       const layer = getFocusLayer(race, leg.focusIdx);
       const pu = layer.popups.find((p) => p.id === leg.popupId);
-      return !!pu?.result;
+      if (!pu) return false;
+      return leg.side === 'under' ? !pu.result : !!pu.result;
+    }
+    case 'teamWin': case 'teamPodium': case 'teamDouble': case 'teamHalf': {
+      const ps = race.field.map((r, i) => (r.team === leg.team ? script.finishOrder.indexOf(i) : -1)).filter((p) => p >= 0);
+      if (!ps.length) return false;
+      if (leg.market === 'teamWin') return ps.includes(0);
+      if (leg.market === 'teamPodium') return ps.some((p) => p < 3);
+      if (leg.market === 'teamDouble') return ps.length > 1 && ps.every((p) => p < 3);
+      return ps.every((p) => p < race.field.length / 2);
     }
     default: return false;
   }
