@@ -94,8 +94,11 @@ function ingest(vehicle, gltf) {
   gltf.scene.traverse((o) => { if (o.isSkinnedMesh) skin = o; if (o.userData && o.userData.vehicle) rigMeta = o.userData; });
   if (skin) {
     // A rigged figure: kept whole (skeleton and clips) and cloned per use;
-    // the template entry carries what the livery machinery needs.
+    // the template entry carries what the livery machinery needs. The GLB
+    // ships without normals (every triangle has its own atlas island, so
+    // they are flat anyway) and the loader does not make them.
     skin.frustumCulled = false;
+    if (!skin.geometry.attributes.normal) skin.geometry.computeVertexNormals();
     rigs.set(vehicle, { scene: gltf.scene, clips: gltf.animations || [], meta: rigMeta });
     templates.set(vehicle, { meta: rigMeta, parts: { body: skin.geometry }, pivots: {}, parents: {}, wheels: [] });
     return;
