@@ -210,9 +210,10 @@ export function rock(rand, color = 0x77736e) {
 
 // --- desert -----------------------------------------------------------------
 
-// An oblong ribbed bulb of a cactus with one to three L-shaped arms that
-// run out and curve upward, each ending in its own bulb.
-export function cactus(rand) {
+// An oblong ribbed bulb of a cactus with L-shaped arms that run out and
+// curve upward, each ending in its own bulb, none reaching the stalk's top.
+// `arms` is 0, 1 or 2; two arms sit at different heights on different sides.
+export function cactus(rand, arms = 1) {
   const parts = [];
   const green = 0x4f8a3e;
   const ribs = (geo) => {
@@ -232,13 +233,16 @@ export function cactus(rand) {
   for (let k = 0; k <= 9; k++) {
     const t = k / 9, y = t * H;
     const w = Math.pow(Math.max(0, 1 - Math.pow((t - 0.5) * 2, 4)), 0.5);
-    prof.push(new THREE.Vector2(k === 0 ? 0.001 : R * Math.max(0.3, w) * (k === 9 ? 0.02 : 1), y));
+    prof.push(new THREE.Vector2(k === 0 ? R * 0.45 : R * Math.max(0.3, w) * (k === 9 ? 0.02 : 1), y)); // blunt base, sits in the ground
   }
   parts.push(paint(ribs(new THREE.LatheGeometry(prof, 11)), green, 0.06, ribShade, rand));
-  const arms = 1 + Math.floor(rand() * 3);
+  const th0 = rand() * Math.PI * 2;
   for (let a = 0; a < arms; a++) {
-    const th = rand() * Math.PI * 2, y0 = H * (0.3 + rand() * 0.3);
-    const out = 0.7 + rand() * 0.4, up = 1.2 + rand() * 0.9, r = 0.2 + rand() * 0.06;
+    // second arm: the other side, a good way higher or lower
+    const th = a === 0 ? th0 : th0 + Math.PI * (0.6 + rand() * 0.8);
+    const y0 = a === 0 ? H * (0.28 + rand() * 0.22) : H * (0.5 + rand() * 0.14);
+    const out = 0.7 + rand() * 0.4, r = 0.2 + rand() * 0.06;
+    const up = Math.min(1.2 + rand() * 0.9, H * 0.82 - y0);
     const dx = Math.cos(th), dz = Math.sin(th);
     const path = new THREE.CatmullRomCurve3([
       V(dx * R * 0.6, y0, dz * R * 0.6), V(dx * (R + out * 0.6), y0 - 0.05, dz * (R + out * 0.6)),
@@ -363,7 +367,10 @@ export function beachHut(rand) {
   return merge(parts);
 }
 
-export const SPECIES = { spruce, fir, oak, birch, bushRound, bushWide, scrub, stump, log, rock, cactus, palm, hayBale, fenceSection, peak, streetlight, hydrant, mailbox, bench, bollard, trashCan, trafficLight, beachHut };
+export const cactusBare = (rand) => cactus(rand, 0);
+export const cactusTwin = (rand) => cactus(rand, 2);
+
+export const SPECIES = { spruce, fir, oak, birch, bushRound, bushWide, scrub, stump, log, rock, cactus, cactusBare, cactusTwin, palm, hayBale, fenceSection, peak, streetlight, hydrant, mailbox, bench, bollard, trashCan, trafficLight, beachHut };
 
 // One shared material for everything painted per vertex.
 let floraMat = null, floraMat2 = null;

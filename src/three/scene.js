@@ -509,7 +509,11 @@ export class RaceScene {
       const laps = this.race.tour.laps;
       const leadD = this.cars.length ? Math.max(...this.cars.map((c) => c.dist)) : 0;
       const lap = clamp(Math.floor(leadD / this.script.lapLen) + 1, 1, laps);
-      const text = mode !== 'race' ? 'START' : script.finished(t) || lap >= laps ? 'FINISH' : `LAP ${lap}/${laps}`;
+      // FINISH only once the leader is on the last lap and closing on the
+      // line, so a viewer following a car a lap down isn't misled.
+      const toLine = this.script.lapLen - (((leadD % this.script.lapLen) + this.script.lapLen) % this.script.lapLen);
+      const closing = lap >= laps && toLine < 260;
+      const text = mode !== 'race' ? 'START' : script.finished(t) || leadD >= this.script.totalDist || closing ? 'FINISH' : `LAP ${lap}/${laps}`;
       const color = text === 'START' ? '#2ee6a8' : text === 'FINISH' ? '#ff4d5e' : '#ffd12a';
       this.track.tick(wallTime, text, color);
     }

@@ -374,7 +374,9 @@ export function buildTerrain({ style, theme, samples, zones, halfW, rand, flats 
   function desertDressing() {
     const g = new THREE.Group();
     addAll(g, [
-      ['cactus', species(380, 200, (zw) => 0.05 + 0.7 * (zw.w.plains || 0) + 0.5 * (zw.w.mesa || 0), [0.7, 1.4], -0.25, (r) => 0.85 + r() * 0.4)],
+      ['cactus', species(170, 200, (zw) => 0.05 + 0.7 * (zw.w.plains || 0) + 0.5 * (zw.w.mesa || 0), [0.7, 1.4], -0.25, (r) => 0.85 + r() * 0.4)],
+      ['cactusBare', species(110, 200, (zw) => 0.05 + 0.7 * (zw.w.plains || 0) + 0.5 * (zw.w.mesa || 0), [0.7, 1.4], -0.25, (r) => 0.85 + r() * 0.4)],
+      ['cactusTwin', species(110, 200, (zw) => 0.05 + 0.7 * (zw.w.plains || 0) + 0.5 * (zw.w.mesa || 0), [0.7, 1.4], -0.25, (r) => 0.85 + r() * 0.4)],
       ['scrub', species(900, 220, (zw) => 0.15 + 0.8 * (zw.w.plains || 0) + 0.4 * (zw.w.mesa || 0) + 0.3 * (zw.w.canyon || 0), [0.6, 1.5], -0.3)],
       ['rock', species(360, 160, (zw) => 0.1 + 0.8 * (zw.w.canyon || 0) + 0.6 * (zw.w.mesa || 0), [0.6, 2.8], -0.5, (r) => 0.6 + r() * 0.5)],
     ].map(([k, m]) => (k === 'rock' ? ['redRock', m] : [k, m])));
