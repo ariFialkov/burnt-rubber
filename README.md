@@ -113,18 +113,23 @@ choreography. Gap curves with per-racer "drama harmonics" (inconsistent
 racers swing harder) produce overtakes and swings all race while converging
 exactly to the scripted finish.
 
-**Pit stops.** The formula, stock and bike tours run a pit lap: every car
-comes in once, on the lap before the last, through a lane that peels off
-the inside of the start straight. The virtual pace car itself crawls
-through the lane at a speed that costs it exactly the mean stop, so the
-scripted gaps hold across the lap; each car then drives the lane on its own
-kinematics (`PIT` in `src/engine/script.js`): brakes to a standstill in its
-team's box for a stop drawn log-normally around the class median, launches,
-and rejoins — and whatever its stop cost against the mean it earns back
-smoothly before the lane, so it leaves on its scripted gap with nothing to
-claw back (any remainder beyond a cap fades out after). Standings are by
-distance, so a car sitting in its box loses places to the field until they
-pit too. The complex (`src/three/pits.js`) is built from the track's own
+**Pit stops.** The formula, stock and bike tours run four laps and every
+car comes in once, through a lane that peels off the inside of the start
+straight, at the end of lap one, two or three: the teams are dealt round
+the windows in a seeded order with a team's two cars on consecutive ones,
+so the field is spread evenly and no garage ever has both its cars in the
+lane at once. Each pit lap has its own reference profile — the virtual pace
+car crawls through the lane on that lap at a speed that costs it exactly
+the mean stop, and every profile is solved to cost the same time, so they
+coincide again once the last lane is done and the scripted gaps mean the
+same thing at the flag whatever lap a car chose. Each car then drives the
+lane on its own kinematics (`PIT` in `src/engine/script.js`): brakes to a
+standstill in its team's box for a stop drawn log-normally around the
+class median, launches, and rejoins — and whatever its stop cost against
+the mean it earns back smoothly before the lane, so it leaves on its
+scripted gap with nothing to claw back (any remainder beyond a cap fades
+out after). Standings are by distance, so a car sitting in its box loses
+places to the field until they pit too. The complex (`src/three/pits.js`) is built from the track's own
 frames: lane surface with the fast-lane line and box markings, a pit wall
 with a stand on it, a garage per team with its header, sign and kit, and a
 control centre behind each with window bands, a dish and masts. A crew per
@@ -146,10 +151,12 @@ stock cars wind up slowly to a high speed, rally cars and bikes sit in the
 middle (bikes launch hard), trophy trucks lumber. The base race distance is
 wherever the pace car gets to in 40 seconds, so the lap length follows from
 the profile; each tour then scales that distance (`distScale` in
-`src/data/tours.js`: the formula tour runs a 1.3 km grand-prix layout,
-the stock cars a 1.1 km oval, a quarter more stage on rally and baja) and
-the leader's time follows from the distance, about 48 to 55 seconds. The race window is sized so a 40-truck field's tail is home
-before the results. Gaps are kept in seconds but drawn in metres: on
+`src/data/tours.js`: the formula tour runs four laps of a 1.2 km
+grand-prix layout, the stock cars four of a 1 km oval, a quarter more stage
+on rally and baja) and the leader's time follows from the distance, about
+75 to 85 seconds on the loop tours with a pit stop each, 50 to 55 on a
+stage. The race window is sized so a 40-truck field's tail is home before
+the results. Gaps are kept in seconds but drawn in metres: on
 the grid a second is one row pitch, at cruise it is a cruise-speed's worth of
 road, so the whole field launches together from its real slots and stretches
 out as the speed builds. Every surge or fade (holeshot enforcement, popup

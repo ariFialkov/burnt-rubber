@@ -194,7 +194,7 @@ export function buildPits(track, script, race, rand) {
     garages.push({ team, j, fC, colors, center: L.p.clone(), t: L.t.clone(), n: L.n.clone(), front, GD, GW, q });
   });
 
-  group.add(new THREE.Mesh(merge(parts), new THREE.MeshLambertMaterial({ vertexColors: true })));
+  group.add(new THREE.Mesh(merge(parts), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }))); // the strips wind either way depending on the infield side
   group.add(signs);
 
   // Anything scattered by the dressing must keep off the complex.
