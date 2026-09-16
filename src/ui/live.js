@@ -453,7 +453,7 @@ function updatePitScene(ctx, st, script, focusIdx) {
   const scene = ctx.currentScene;
   const ps = script.pitState(focusIdx, st.tRace, scene?.adj ?? null);
   if (!ps) return;
-  const on = ps.tw >= ps.tEnter - 2.2 && ps.tw <= ps.tExit + 1.0;
+  const on = ps.tw >= ps.tEnter - 2.2 && ps.tw <= Math.min(ps.tCruise, ps.tExit + 2.5);
   if (!on) { if (ui.pitCam) endPitScene(false); return; }
   if (ui.pitSkipped === ps.tEnter) return;
   if (!ui.pitCam) {

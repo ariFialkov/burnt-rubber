@@ -123,12 +123,17 @@ car crawls through the lane on that lap at a speed that costs it exactly
 the mean stop, and every profile is solved to cost the same time, so they
 coincide again once the last lane is done and the scripted gaps mean the
 same thing at the flag whatever lap a car chose. Each car then drives the
-lane on its own kinematics (`PIT` in `src/engine/script.js`): brakes to a
-standstill in its team's box for a stop drawn log-normally around the
-class median, launches, and rejoins — and whatever its stop cost against
-the mean it earns back smoothly before the lane, so it leaves on its
-scripted gap with nothing to claw back (any remainder beyond a cap fades
-out after). Standings are by distance, so a car sitting in its box loses
+lane on its own kinematics (`PIT` in `src/engine/script.js`): arrives at
+race pace, brakes hard on the entry ramp down to the lane limit, holds it
+to its team's box, brakes to a standstill for a stop drawn log-normally
+around the class median, launches back to the limit, holds it to the lane
+end and pulls away up to pace over the next couple of hundred metres —
+handing back to its gap curve at the speed that curve is running, so
+there is no snap in position or speed at either end. Whatever its stop
+cost against the mean it earns back gently: a share before the lane (never
+more than a modest pace difference over the window it has) and the rest
+faded out over the race after, so a car that pitted early simply sits
+lower until the cars ahead take their turn. Standings are by distance, so a car sitting in its box loses
 places to the field until they pit too. The complex (`src/three/pits.js`) is built from the track's own
 frames: lane surface with the fast-lane line and box markings, a pit wall
 with a stand on it, a garage per team with its header, sign and kit, and a

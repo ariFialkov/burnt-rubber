@@ -34,16 +34,16 @@ export const GRID_PITCH = { formula: 7, stock: 6, rally: 6, moto: 4.5, baja: 7 }
 // a lane that spans `span` metres of track distance around the start line.
 // `vLane` is the lane speed limit; the stationary stop time per car is drawn
 // log-normally around `median` (so the over/under `line` prices from the
-// same distribution the stop is drawn from). `decel`/`accel` are the
-// reference's ramps into and out of the lane speed, in metres; `brake` and
-// `launch` are each car's own seconds from lane speed to a standstill at
-// its box and back up to lane speed.
+// same distribution the stop is drawn from). A car brakes from race pace
+// to the lane limit at `brakeA` (m/s²) once it is on the entry ramp, and
+// pulls away from the lane end at `accelA` back up to pace; `brake` and
+// `launch` are its seconds from lane speed to a standstill at its box and
+// back up to lane speed.
 export const PIT = {
-  formula: { span: 230, vLane: 24, line: 2.5, median: 2.62, sigma: 0.22, decel: 60, accel: 90, boxFrom: 0.28, boxPitch: 6, brake: 1.1, launch: 1.6 },
-  stock:   { span: 230, vLane: 24, line: 4.5, median: 4.7, sigma: 0.2, decel: 70, accel: 100, boxFrom: 0.26, boxPitch: 6, brake: 1.2, launch: 2.0 },
-  moto:    { span: 190, vLane: 18, line: 3.5, median: 3.66, sigma: 0.22, decel: 50, accel: 70, boxFrom: 0.28, boxPitch: 5, brake: 1.1, launch: 1.8 },
+  formula: { span: 230, vLane: 24, line: 2.5, median: 2.62, sigma: 0.22, brakeA: 60, accelA: 12, boxFrom: 0.3, boxPitch: 6, brake: 1.1, launch: 1.6 },
+  stock:   { span: 230, vLane: 24, line: 4.5, median: 4.7, sigma: 0.2, brakeA: 55, accelA: 13, boxFrom: 0.31, boxPitch: 6, brake: 1.2, launch: 2.0 },
+  moto:    { span: 190, vLane: 18, line: 3.5, median: 3.66, sigma: 0.22, brakeA: 40, accelA: 11, boxFrom: 0.3, boxPitch: 5, brake: 1.1, launch: 1.8 },
 };
-const RAMP1 = 1.0; // seconds a car takes to go from the reference's lane pace to its own, and back
 
 // Standard normal tail via erf.
 function erf(x) { const t = 1 / (1 + 0.3275911 * Math.abs(x)); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x < 0 ? -y : y; }
@@ -143,9 +143,17 @@ export function getScript(race) {
     const dInAt = (k) => k * lapLen - 0.55 * pitSpec.span;
     const windows = race.tour.laps - 1;
     const dMean = pitSpec.median * Math.exp(pitSpec.sigma * pitSpec.sigma / 2);
-    const vEff = pitSpec.span / (pitSpec.span / pitSpec.vLane + dMean);
+    const { span, vLane, brakeA, accelA, brake, launch } = pitSpec;
+    // braking on the entry ramp, and the pull-away past the lane end
+    const Ld = (cruise * cruise - vLane * vLane) / (2 * brakeA);
+    const La = (cruise * cruise - vLane * vLane) / (2 * accelA);
+    // what the lane costs a car with the mean stop, against running the
+    // same road at cruise: the reference's slow section is solved to match
+    const laneTime = (cruise - vLane) / brakeA + (span - Ld - vLane * (brake + launch) / 2) / vLane + brake + dMean + launch + (cruise - vLane) / accelA;
+    const meanCost = laneTime - (span + La) / cruise;
+    const vEff = span / (span / vLane + dMean); // a first guess for the slow section
     const dIn = dInAt(1);
-    pit = { ...pitSpec, windows, dInAt, dIn, dOut: dIn + pitSpec.span, vEff, dMean, uIn: ((dIn / lapLen) % 1 + 1) % 1, uOut: (((dIn + pitSpec.span) / lapLen) % 1 + 1) % 1 };
+    pit = { ...pitSpec, windows, dInAt, dIn, dOut: dIn + span, Ld, La, meanCost, vEff, dMean, uIn: ((dIn / lapLen) % 1 + 1) % 1, uOut: (((dIn + span) / lapLen) % 1 + 1) % 1 };
   }
   // Reference profiles as tables: the launch, then cruise, with a lane's
   // decel / slow section / accel cut in by distance on pit lap k (k = 0:
@@ -154,13 +162,14 @@ export function getScript(race) {
   const buildProfile = (dIn, vEff) => {
     const tT = [0], xX = [0], vV = [0];
     const dOut = dIn == null ? 0 : dIn + pit.span;
+    const c2 = cruise * cruise, e2 = vEff * vEff;
     const targetAt = (x0) => {
       if (dIn == null) return cruise;
       const xx = x0 - GRID_OFFSET; // drawn distance: the line is GRID_OFFSET into the reference's run
-      if (xx < dIn - pit.decel || xx > dOut + pit.accel) return cruise;
-      if (xx < dIn) return lerp(cruise, vEff, (xx - (dIn - pit.decel)) / pit.decel);
+      if (xx < dIn || xx > dOut + pit.La) return cruise;
+      if (xx < dIn + pit.Ld) return Math.sqrt(c2 - (c2 - e2) * (xx - dIn) / pit.Ld); // constant deceleration on the entry ramp
       if (xx <= dOut) return vEff;
-      return lerp(vEff, cruise, (xx - dOut) / pit.accel);
+      return Math.sqrt(e2 + (c2 - e2) * (xx - dOut) / pit.La);                      // constant acceleration past the lane end
     };
     let t = 0, x = 0;
     while (t < 260) {
@@ -188,18 +197,16 @@ export function getScript(race) {
   const profiles = new Map();
   profiles.set(0, buildProfile(null, null));
   if (pit) {
-    // lap 1's lane sets the cost; a later lap's lane speed is solved so it
-    // costs the same (the launch may still be running through lap 1)
+    // each lap's slow-section speed is solved so the lane costs the
+    // reference exactly what it costs a car with the mean stop (the launch
+    // may still be running through lap 1's lane, so it is per lap)
     const clean = profiles.get(0).time(totalDist);
-    const first = buildProfile(pit.dInAt(1), pit.vEff);
-    profiles.set(1, first);
-    const cost = first.time(totalDist) - clean;
-    for (let k = 2; k <= pit.windows; k++) {
-      let lo = pit.vEff * 0.5, hi = Math.min(cruise, pit.vLane), P = null;
-      for (let it = 0; it < 24; it++) {
+    for (let k = 1; k <= pit.windows; k++) {
+      let lo = 2, hi = pit.vLane, P = null;
+      for (let it = 0; it < 26; it++) {
         const mid = (lo + hi) / 2;
         P = buildProfile(pit.dInAt(k), mid);
-        if (P.time(totalDist) - clean > cost) lo = mid; else hi = mid;
+        if (P.time(totalDist) - clean > pit.meanCost) lo = mid; else hi = mid;
       }
       profiles.set(k, P);
     }
@@ -240,7 +247,7 @@ export function getScript(race) {
   // The lap-1 mark in race time, from the pace profile (a slow launch makes
   // the first lap the longest). A point-to-point stage has no lap: the mark
   // is an early split instead.
-  const markDist = race.tour.laps === 1 ? lapLen * 0.3 : Math.min(lapLen * 0.9, pit ? pit.dIn - pit.decel - 30 : Infinity);
+  const markDist = race.tour.laps === 1 ? lapLen * 0.3 : Math.min(lapLen * 0.9, pit ? pit.dIn - 30 : Infinity);
   const lap1S = (() => {
     let lo = 0, hi = T;
     for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (paceDist(mid) - GRID_OFFSET < markDist) lo = mid; else hi = mid; }
@@ -362,8 +369,14 @@ export function getScript(race) {
   // PRE_MAX+2 s before it — any car reaching the lane earlier by the whole
   // correction still finds the rise complete. Anything past the cap rides
   // out of the lane and fades afterwards.
-  const PRE_MAX = 4;
-  const preRise = (s, sEnter) => { const s1 = Math.max(0.12, sEnter - (PRE_MAX + 2) / T); const s0 = Math.max(0.05, Math.min(upToSpeed + 0.02, s1 - 0.15)); return smoothstep(clamp((s - s0) / (s1 - s0), 0, 1)); };
+  // The window opens once the field is on the time shift (a gap change
+  // during the launch is amplified by the grid-to-cruise conversion) and
+  // the correction is capped at a modest share of the window, so it never
+  // reads as a car on a mission; a short window (an early stop) leaves
+  // more to the fade after the lane, which then has the whole race to go.
+  const PRE_MAX = 4, PRE_RATE = 0.12;
+  const preWin = (sEnter) => { const s1 = Math.max(shiftTo / T + 0.1, sEnter - (PRE_MAX + 2) / T); const s0 = Math.max(shiftTo / T + 0.02, Math.min(upToSpeed + 0.02, s1 - 0.15)); return [s0, Math.max(s1, s0 + 0.04)]; };
+  const preRise = (s, sEnter) => { const [s0, s1] = preWin(sEnter); return smoothstep(clamp((s - s0) / (s1 - s0), 0, 1)); };
   function pitFor(i, adj) {
     if (!pit) return null;
     const key = adj || 'base';
@@ -371,10 +384,8 @@ export function getScript(race) {
     if (!per) { per = new Array(n).fill(undefined); pitCache.set(key, per); }
     if (per[i] !== undefined) return per[i];
     const k = lapOf[i], prof = profileOf(k);
-    const r = pit.vLane / prof.vEff;
     const dIn = prof.dIn, dOut = prof.dOut;
-    const dBox = dIn + pit.span * pit.boxFrom + boxOf[i] * pit.boxPitch;
-    const tauIn = paceTime(dIn + GRID_OFFSET, k), tauBox = paceTime(dBox + GRID_OFFSET, k), tauOut = paceTime(dOut + GRID_OFFSET, k);
+    const xBox = pit.span * pit.boxFrom + boxOf[i] * pit.boxPitch;     // the box, along the lane
     let pre = 0, sEnterGuess = 0.5, info = null;
     for (let pass = 0; pass < 8; pass++) {
       const usedPre = pre, usedS = sEnterGuess;
@@ -384,47 +395,66 @@ export function getScript(race) {
       let lo = 0, hi = tEnd;
       for (let it = 0; it < 60; it++) { const mid = (lo + hi) / 2; if (baseDist(mid) < dIn) lo = mid; else hi = mid; }
       const tEnter = lo;
-      info = timings(tEnter, tauIn, tauBox, tauOut, r, dBox, i, adj);
+      const v0 = clamp((baseDist(tEnter) - baseDist(tEnter - 0.1)) / 0.1, pit.vLane + 1, cruise * 1.2); // arriving speed
+      info = laneRun(tEnter, v0, xBox, i, k, adj);
       info.pre = usedPre; info.sEnter = usedS; info.lap = k; info.dIn = dIn; info.dOut = dOut;
       if (Math.abs(info.dev) < 0.02) break;
-      pre = clamp(usedPre + 0.85 * info.dev, -PRE_MAX, PRE_MAX);
       if (pass === 0) sEnterGuess = tEnter / T;           // the window is set once, from the uncorrected entry
+      const [w0, w1] = preWin(sEnterGuess);
+      const cap = Math.min(PRE_MAX, PRE_RATE * (w1 - w0) * T);
+      pre = clamp(usedPre + 0.85 * info.dev, -cap, cap);
       if (pre === usedPre) break;                          // capped: the rest fades after the lane
     }
     per[i] = info;
     return info;
   }
-  function timings(tEnter, tauIn, tauBox, tauOut, r, dBox, i, adj) {
-    // reference-time advance while the rate ramps 1 -> r over RAMP1 seconds
-    const rampAdv = RAMP1 * (1 + r) / 2;
-    // Braking into the box and launching out of it: the rate runs r -> 0
-    // over `brake` seconds and 0 -> r over `launch`, each costing half its
-    // length against a car that could stop dead.
-    const B = pit.brake, L = pit.launch;
-    const toBox = (tauBox - tauIn - rampAdv) / r + RAMP1 + B / 2;  // real seconds from entry to the box
+  // A car's own run through the lane, from the entry at v0: brake to the
+  // lane limit on the ramp, hold it to the box, brake to a standstill, the
+  // stop, launch back to the limit, hold it to the lane end, then pull
+  // away up to pace. Distances along the lane from its entry.
+  function laneRun(tEnter, v0, xBox, i, k, adj) {
+    const { span, vLane, brake: B, launch: L, accelA } = pit;
     const D = stopOf[i];
-    const tBox = tEnter + toBox, tLeave = tBox + D;
-    const toOut = (tauOut - tauBox) / r + L / 2;                   // real seconds from the box to the lane end
-    const tOut = tLeave + toOut, tExit = tOut + RAMP1;             // then the rate eases back to 1
-    // reference time at real time tw, inside the window
-    const tauAt = (tw) => {
-      const d = tw - tEnter;
-      if (d < RAMP1) return tauIn + d + (r - 1) * d * d / (2 * RAMP1);
-      if (tw < tBox - B) return tauIn + rampAdv + r * (d - RAMP1);
-      if (tw < tBox) { const e = tBox - tw; return tauBox - r * e * e / (2 * B); }
-      if (tw < tLeave) return tauBox;
-      if (tw < tLeave + L) { const e = tw - tLeave; return tauBox + r * e * e / (2 * L); }
-      if (tw < tOut) return tauBox + r * L / 2 + r * (tw - tLeave - L);
-      const e = tw - tOut;
-      return tauOut + r * e - (r - 1) * e * e / (2 * RAMP1);
+    const xStop = xBox - vLane * B / 2;                                  // where the box braking starts
+    const aB = Math.max(pit.brakeA, (v0 * v0 - vLane * vLane) / (2 * Math.max(6, xStop - 4))); // always down to the limit before the box braking
+    const Lb = (v0 * v0 - vLane * vLane) / (2 * aB), tb = (v0 - vLane) / aB;
+    const t1 = tEnter + tb;                                              // at the lane limit
+    const t2 = t1 + Math.max(0, xStop - Lb) / vLane;                     // box braking starts
+    const tBox = t2 + B, tLeave = tBox + D;
+    const xGo = xBox + vLane * L / 2;                                    // back at the limit
+    const t3 = tLeave + L;
+    const tExit = t3 + Math.max(0, span - xGo) / vLane;                  // lane end
+    // The pull-away ends where the reference's own does, at the speed the
+    // car's scripted trajectory is running there (its gap may be opening
+    // or closing at the time) — so the hand-back to the gap curve is
+    // seamless in position and speed alike.
+    const xCruise = span + pit.La;
+    let aX = accelA, ta = (cruise - vLane) / accelA, tCruise = tExit + ta;
+    for (let it = 0; it < 3; it++) {
+      const slope = (gapSec(i, clamp((tCruise + 0.05) / T, 0, 1), adj) - gapSec(i, clamp((tCruise - 0.05) / T, 0, 1), adj)) / 0.1;
+      const vEnd = clamp(cruise * (1 - slope), vLane + 4, cruise * 1.2);
+      aX = clamp((vEnd * vEnd - vLane * vLane) / (2 * pit.La), accelA * 0.3, accelA * 1.8);
+      ta = (Math.sqrt(vLane * vLane + 2 * aX * pit.La) - vLane) / aX;
+      tCruise = tExit + ta;
+    }
+    const xAt = (tw) => {
+      if (tw < t1) { const e = tw - tEnter; return v0 * e - aB * e * e / 2; }
+      if (tw < t2) return Lb + vLane * (tw - t1);
+      if (tw < tBox) { const e = tw - t2; return xStop + vLane * e - vLane * e * e / (2 * B); }
+      if (tw < tLeave) return xBox;
+      if (tw < t3) { const e = tw - tLeave; return xBox + vLane * e * e / (2 * L); }
+      if (tw < tExit) return xGo + vLane * (tw - t3);
+      const e = Math.min(tw - tExit, ta);
+      return span + vLane * e + aX * e * e / 2;
     };
-    const tauExit = tauAt(tExit);
-    const gExit = tExit - tauExit;                                   // the gap the car leaves the lane with
-    const dev = gExit - gapSec(i, clamp(tExit / T, 0, 1), adj);      // ...versus its scripted gap
-    return { tEnter, tBox, tLeave, tOut, tExit, D, dBox, dev, tauAt, boxIdx: boxOf[i] };
+    const dIn = profileOf(k).dIn;
+    // the gap the car is back on pace with, versus its scripted gap there
+    const gExit = tCruise - paceTime(dIn + xCruise + GRID_OFFSET, k);
+    const dev = gExit - gapSec(i, clamp(tCruise / T, 0, 1), adj);
+    return { tEnter, tBox, tLeave, tExit, tCruise, D, dBox: dIn + xBox, dev, xAt, v0, boxIdx: boxOf[i] };
   }
   // The stop's deviation from the mean fades out by the settled point.
-  const devFade = (tw, tExit) => { const s0 = tExit / T, s1 = Math.max(s0 + 0.08, SETTLED); const s = tw / T; if (s <= s0) return 1; if (s >= s1) return 0; const x = (s - s0) / (s1 - s0); return 0.5 + 0.5 * Math.cos(Math.PI * x); };
+  const devFade = (tw, tExit) => { const s0 = tExit / T, s1 = Math.max(s0 + 0.08, 0.96); const s = tw / T; if (s <= s0) return 1; if (s >= s1) return 0; const x = (s - s0) / (s1 - s0); return 0.5 + 0.5 * Math.cos(Math.PI * x); };
 
   const script = {
     race, T, lapLen, totalDist, paceMps, pace, pitch, raceS: RACE_S, tEnd, runOff: cruise * (maxGap + 2 + COAST) + 80,
@@ -432,7 +462,7 @@ export function getScript(race) {
     shape, upToSpeed, maxAmp,
     grid, gridSlotOf, finishOrder, finalGap, margin,
     holeshotIdx, fastestLapIdx, fastestLapS,
-    gapSec, pit, pitFor, stopOf, boxOf, lapOf, teams, offsetMetres, preRise,
+    gapSec, pit, pitFor, pitReset: (adj) => { pitCache.delete(adj || 'base'); }, stopOf, boxOf, lapOf, teams, offsetMetres, preRise,
     // Distance along the track in metres at race-time t (seconds), with the
     // start line at 0. At t=0 every car sits in its grid slot; in its pit
     // window a car is on the lane's kinematics; after the last car is home
@@ -441,10 +471,10 @@ export function getScript(race) {
       const tw = warp(t);
       const p = pit ? pitFor(i, adj) : null;
       const k = p ? p.lap : 0;
-      if (p && tw >= p.tEnter && tw < p.tExit) return paceDist(p.tauAt(tw), k) - GRID_OFFSET;
+      if (p && tw >= p.tEnter && tw < p.tCruise) return p.dIn + p.xAt(tw);
       const s = clamp(tw / T, 0, 1);
       let g = gapSec(i, s, adj);
-      if (p) g += tw < p.tEnter ? -p.pre * preRise(s, p.sEnter) : p.dev * devFade(tw, p.tExit);
+      if (p) g += tw < p.tEnter ? -p.pre * preRise(s, p.sEnter) : p.dev * devFade(tw, p.tCruise);
       return paceDist(tw, k) - offsetMetres(g, tw, k) - GRID_OFFSET;
     },
     // Where car i is in its pit stop at race-time t, or null.
@@ -453,8 +483,7 @@ export function getScript(race) {
       if (!p) return null;
       const tw = warp(t);
       const inLane = tw >= p.tEnter && tw < p.tExit;
-      const d = inLane ? paceDist(p.tauAt(tw), p.lap) - GRID_OFFSET : null;
-      return { ...p, inLane, f: inLane ? clamp((d - p.dIn) / pit.span, 0, 1) : null, boxF: (p.dBox - p.dIn) / pit.span,
+      return { ...p, inLane, f: inLane ? clamp(p.xAt(tw) / pit.span, 0, 1) : null, boxF: (p.dBox - p.dIn) / pit.span,
         stopped: tw >= p.tBox && tw < p.tLeave, stopT: clamp(tw - p.tBox, 0, p.D), tw };
     },
     // Ranked indices at normalized time s (furthest along = P1).
@@ -513,10 +542,16 @@ export function getFocusLayer(race, focusIdx) {
   // heads for the lane. Popup windows that would overlap the stop move past it.
   const pitInfo = script.pit ? script.pitFor(focusIdx, adj) : null;
   if (pitInfo) {
-    const sIn = pitInfo.tEnter / T, sOut = pitInfo.tExit / T;
+    const sIn = pitInfo.tEnter / T, sOut = pitInfo.tCruise / T;
+    // a slot that would overlap the stop moves ahead of it if there is room
+    // once the field is up to speed, else past it
+    let before = 0, after = 0;
     for (let k = 0; k < slots.length; k++) {
       const s0 = slots[k], s1 = s0 + 0.24;
-      if (s1 > sIn - 0.04 && s0 < sOut + 0.04) slots[k] = Math.min(0.72, sOut + 0.05 + k * 0.03);
+      if (!(s1 > sIn - 0.04 && s0 < sOut + 0.04)) continue;
+      const early = sIn - 0.06 - 0.24 - before * 0.12;
+      if (early >= Math.max(0.16, script.upToSpeed + 0.05)) { slots[k] = early; before++; }
+      else { slots[k] = Math.min(0.72, sOut + 0.05 + after * 0.12); after++; }
     }
     const P = script.pit;
     const pOver = 1 - normCdf(Math.log(P.line / P.median) / P.sigma);
@@ -628,6 +663,9 @@ export function getFocusLayer(race, focusIdx) {
     pu.result = happened;
   }
 
+  // The pit timings cached against this adjustment were resolved while its
+  // impulses were still being added; drop them so they resolve on the final curve.
+  script.pitReset(adj);
   const layer = { focusIdx, popups, adj };
   focusCache.set(key, layer);
   return layer;

@@ -455,9 +455,14 @@ export class RaceScene {
         car.wantLane = clamp(home + wander, -span, span);
         // heading for the pits: over to the inside edge; rejoining: from it
         if (car.pit) {
-          const edgeLane = -this.pits.side * this.pits.edge;
-          if (!car.pit.inLane && car.pit.tw > car.pit.tEnter - 4 && car.pit.tw < car.pit.tEnter) car.wantLane = edgeLane;
-          if (car.pit.inLane) { car.lane = edgeLane; car.laneVel = 0; car.lon = 0; }
+          const edgeLane = this.pits.side * this.pits.edge; // the lane peels off along the track normal times the infield side, same as scene lanes
+          if (!car.pit.inLane && car.pit.tw > car.pit.tEnter - 7 && car.pit.tw < car.pit.tEnter) car.wantLane = edgeLane;
+          if (car.pit.inLane) {
+            // whatever is left of the way over is carried into the lane and eased out along its entry ramp
+            if (!car.wasInLane) car.pitLat = car.lane - edgeLane;
+            car.lane = edgeLane; car.laneVel = 0; car.lon = 0;
+          }
+          car.wasInLane = car.pit.inLane;
         }
         // A scene picked up mid-race starts on its line rather than steering
         // over from the grid column; within the launch the column is right.
@@ -501,6 +506,8 @@ export class RaceScene {
       if (car.pit?.inLane) {
         const C = this.pits.carAt(car.pit.f, car.pit.boxF);
         p = C.p; tangent = C.t; pos = C.p.clone();
+        const carry = (car.pitLat || 0) * (1 - smoothstep(clamp(car.pit.f / 0.12, 0, 1)));
+        if (carry) pos.addScaledVector(C.n, this.pits.side * carry); // C.n is the track normal times the infield side
       } else {
         const u = this.track.uAt(shown);
         p = this.track.curve.getPointAt(u);
