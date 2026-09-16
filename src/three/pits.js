@@ -34,7 +34,8 @@ const merge = (parts) => { const g = mergeGeometries(parts.map((p) => (p.index ?
 // Lane layout, metres from the track centreline outward on the pit side.
 const LANE_W = 8;         // the lane itself (fast lane + box lane)
 const WALL_GAP = 2.4;     // track edge to pit wall
-const BOX_PULL = 2.6;     // how far a car pulls off the lane centre into its box
+export const BOX_PULL = 2.6;  // how far a car pulls off the lane centre into its box
+const FAST_LANE = 1.35;   // ...and how far the other way the driving line sits
 
 function signTexture(team, palette, colors) {
   const c = document.createElement('canvas');
@@ -91,14 +92,28 @@ export function buildPits(track, script, race, rand) {
     const n = new THREE.Vector3(-t.z, 0, t.x).normalize().multiplyScalar(side);
     return { p, t, n };
   };
-  // Where a car sits at pit fraction f: on the lane centre, pulled into its
-  // box around its own box fraction.
-  const pullAt = (f, boxF) => sstep(boxF - 0.11, boxF - 0.025, f) * (1 - sstep(boxF + 0.025, boxF + 0.1, f));
+  // The lane has two lines: cars run down the fast lane, out toward the
+  // wall, and swing in to the box line only around their own box. One line
+  // would put a car driving past straight through one that is stopped.
+  // In and out over the length of the braking zone, so a car is on the box
+  // line only along its own box and runs past the others out in the lane.
+  const swing = Math.min(0.42 * P.boxPitch, 16) / P.span;
+  // ...in over the braking zone, out again more gently: a car pulling away
+  // from its box takes a good twenty metres to be back on the driving line,
+  // which is both how it looks and what gives anything coming down the lane
+  // time to see it.
+  const pullAt = (f, boxF) => sstep(boxF - swing, boxF - 0.1 * swing, f) * (1 - sstep(boxF + 0.1 * swing, boxF + 3 * swing, f));
+  // Lateral offset from the lane centre (toward the garages is positive).
+  const latAt = (f, boxF) => lerp(-FAST_LANE * ramp(f), BOX_PULL, boxF != null ? pullAt(f, boxF) : 0);
+  // Where a car sits at pit fraction f.
   const carAt = (f, boxF) => {
     const L = laneAt(f);
     const pull = boxF != null ? pullAt(f, boxF) : 0;
-    return { p: L.p.clone().addScaledVector(L.n, BOX_PULL * pull), t: L.t, n: L.n, pull };
+    return { p: L.p.clone().addScaledVector(L.n, latAt(f, boxF)), t: L.t, n: L.n, pull };
   };
+  // Where the lane sits across the track, in the track's own lane units, so
+  // the scene can keep cars on the road clear of one peeling off or rejoining.
+  const trackLaneAt = (f) => side * lerp(edge, laneOff, ramp(f));
 
   const parts = [];
   // --- lane surface with edge lines
@@ -139,26 +154,25 @@ export function buildPits(track, script, race, rand) {
 
   // --- garages and control centres, one per team
   const teams = script.teams;
-  const boxSpan = P.boxPitch / P.span;
+  const boxSpan = P.boxPitch / P.span;   // one box per team, in front of its garage
   const garages = [];
   const signs = new THREE.Group();
   teams.forEach((team, j) => {
-    const fC = P.boxFrom + (2 * j + 0.5) * boxSpan;          // this team's two boxes are centred here
+    const fC = P.boxFrom + j * boxSpan;                      // this team's box
     const L = laneAt(fC);
     const car0 = race.field.find((r) => r.team === team);
     const colors = car0 ? car0.colors : ['#888', '#444', '#ddd'];
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), L.t);
     const at = (dx, dy, dz) => L.p.clone().addScaledVector(L.t, dx).addScaledVector(L.n, dz).setY(L.p.y + dy);
     const box = (w, h, d, dx, dy, dz, color, fn) => { const c = at(dx, dy, dz); parts.push(paint(new THREE.BoxGeometry(w, h, d).applyQuaternion(q).translate(c.x, c.y, c.z), color, fn)); };
-    const GW = 2 * P.boxPitch - 0.6, GD = 9, GH = 5.4, front = LANE_W / 2 + 1.2;
+    const GW = P.boxPitch - 1.2, GD = 9, GH = 5.4, front = LANE_W / 2 + 1.2;
     // apron between the lane and the garage
     box(GW + 1.2, 0.08, front - LANE_W / 2 + 0.6, 0, 0.04, (LANE_W / 2 + front) / 2, 0x3a3b40);
-    // box markings on the lane: an outline per spot
-    for (const s of [-1, 1]) {
-      const cx = s * P.boxPitch / 2;
-      box(0.12, 0.02, 5.6, cx - P.boxPitch / 2 + 0.4, 0.075, LANE_W / 2 - 2.8, 0xf4f4f4);
-      box(0.12, 0.02, 5.6, cx + P.boxPitch / 2 - 0.4, 0.075, LANE_W / 2 - 2.8, 0xf4f4f4);
-      box(P.boxPitch - 0.8, 0.02, 0.12, cx, 0.075, LANE_W / 2 - 5.6, 0xf4f4f4);
+    // the box itself, marked out on the lane in front of the garage
+    { const BW = Math.min(9, P.boxPitch - 3);
+      box(0.12, 0.02, 5.6, -BW / 2, 0.075, LANE_W / 2 - 2.8, 0xf4f4f4);
+      box(0.12, 0.02, 5.6, BW / 2, 0.075, LANE_W / 2 - 2.8, 0xf4f4f4);
+      box(BW, 0.02, 0.12, 0, 0.075, LANE_W / 2 - 5.6, 0xf4f4f4);
     }
     // floor, walls, roof, header
     box(GW, 0.1, GD, 0, 0.05, front + GD / 2, 0x50535a);
@@ -207,7 +221,7 @@ export function buildPits(track, script, race, rand) {
     return true;
   };
 
-  return { group, lane, side, edge, laneAt, carAt, pullAt, garages, clearOfPits, entry: laneAt(0), exit: laneAt(1), BOX_PULL };
+  return { group, lane, side, edge, laneAt, carAt, pullAt, latAt, trackLaneAt, garages, clearOfPits, entry: laneAt(0), exit: laneAt(1), BOX_PULL };
 }
 
 // --- the crews ----------------------------------------------------------------
@@ -222,6 +236,71 @@ export function buildPits(track, script, race, rand) {
 
 const RUN = 5.4, WALK = 2.1, STEP = 1.6; // m/s
 const TYRE_R = { formula: 0.34, stock: 0.36, moto: 0.3 };
+const CLEAR = 0.5;   // how far outside the bodywork a crew member walks
+
+// --- keeping the crew out of the car ----------------------------------------
+// The car in its box is an oriented rectangle, and a member crossing to the
+// far side of it goes round an end rather than through the middle. Both
+// ends of the walk are projected onto the rectangle's perimeter; whichever
+// way round is shorter gives the corners to use as waypoints. The member
+// aims at the first of them, so the path bends round the car as they go.
+function carFrame(job) {
+  return { c: job.center, f: job.forward, l: job.left, hw: job.halfW + CLEAR, hl: job.halfL + CLEAR };
+}
+const toLocal = (F, p) => ({ x: p.clone().sub(F.c).dot(F.l), z: p.clone().sub(F.c).dot(F.f) });
+const toWorld = (F, x, z, y) => F.c.clone().addScaledVector(F.l, x).addScaledVector(F.f, z).setY(y);
+const insideBox = (F, q) => Math.abs(q.x) < F.hw && Math.abs(q.z) < F.hl;
+
+// Does the segment cross the rectangle? (a slab clip in the car's own frame)
+function crossesBox(F, a, b) {
+  const dx = b.x - a.x, dz = b.z - a.z;
+  let t0 = 0, t1 = 1;
+  const slab = (p, q) => {
+    if (Math.abs(p) < 1e-9) return q >= 0;
+    const r = q / p;
+    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+    else { if (r < t0) return false; if (r < t1) t1 = r; }
+    return true;
+  };
+  return slab(-dx, a.x + F.hw) && slab(dx, F.hw - a.x) && slab(-dz, a.z + F.hl) && slab(dz, F.hl - a.z) && t1 > t0;
+}
+
+// Distance round the perimeter to a point, anticlockwise from the near-side
+// front corner. The four corners sit at 0, W, W+L and 2W+L.
+function perimAt(F, q) {
+  const W = 2 * F.hw, L = 2 * F.hl, e = 1e-6;
+  const x = clamp(q.x, -F.hw, F.hw), z = clamp(q.z, -F.hl, F.hl);
+  if (z >= F.hl - e) return F.hw - x;
+  if (x <= -F.hw + e) return W + (F.hl - z);
+  if (z <= -F.hl + e) return W + L + (x + F.hw);
+  return 2 * W + L + (z + F.hl);
+}
+
+// The corner to head for on the way from a to b, and which way round it is.
+// `keep` is the way round chosen last frame: held on to while it is still a
+// way round, so the member commits to one side instead of dithering.
+function roundTheCar(F, a, b, keep) {
+  const W = 2 * F.hw, L = 2 * F.hl, P = 2 * (W + L);
+  const corners = [[0, F.hw, F.hl], [W, -F.hw, F.hl], [W + L, -F.hw, -F.hl], [2 * W + L, F.hw, -F.hl]];
+  const sA = perimAt(F, a), sB = perimAt(F, b);
+  const cyc = (v) => ((v % P) + P) % P;
+  const pick = (dir) => {
+    const span = dir > 0 ? cyc(sB - sA) : cyc(sA - sB);
+    const list = corners
+      .map(([cp, cx, cz]) => [dir > 0 ? cyc(cp - sA) : cyc(sA - cp), cx, cz])
+      .filter(([d]) => d < span)
+      .sort((u, w) => u[0] - w[0]);
+    let len = 0, px = a.x, pz = a.z;
+    for (const [, cx, cz] of list) { len += Math.hypot(cx - px, cz - pz); px = cx; pz = cz; }
+    len += Math.hypot(b.x - px, b.z - pz);
+    return { len, list, dir };
+  };
+  const plus = pick(1), minus = pick(-1);
+  let route = plus.len <= minus.len ? plus : minus;
+  if (keep && keep !== route.dir) { const held = keep > 0 ? plus : minus; if (held.len < route.len * 1.6) route = held; }
+  // stand off the corners themselves, so the path rounds them instead of clipping
+  return { pts: route.list.map(([, cx, cz]) => [cx + Math.sign(cx) * 0.2, cz + Math.sign(cz) * 0.2]), dir: route.dir };
+}
 
 export class PitCrews {
   constructor(scene, pits, race, wheelCount) {
@@ -231,6 +310,7 @@ export class PitCrews {
     this.pits = pits;
     this.vehicle = race.tour.vehicle;
     this.tmp = new THREE.Vector3();
+    this.scratch = new THREE.Vector3();
     // the cast, per garage
     const cast = [];
     if (this.vehicle === 'formula') { for (let k = 0; k < 4; k++) cast.push({ kind: 'gun', role: 'mechanic', wheels: [k] }); for (let k = 0; k < 4; k++) cast.push({ kind: 'carry', role: 'engineer', wheels: [k] }); }
@@ -272,6 +352,33 @@ export class PitCrews {
   }
   restoreWheels(job) { for (const w of job.wheels) if (w.mesh) w.mesh.position.x = w.restX; }
 
+  // Where a member waits while the car is not yet in the box, and steps back
+  // to once it has gone: their own spot when that is on the garage side of
+  // the car, else level with where the nose will be. The lane behind the box
+  // is the car's own way in, and the fast lane beside it is where the rest
+  // of the field goes past — neither is a place to stand.
+  stageSpot(job, spot) {
+    const d = this.scratch.copy(spot).sub(job.center);
+    const x = d.dot(job.left), z = d.dot(job.forward);
+    if (x * job.garageSide > 0 || z > job.halfL) return spot;
+    return job.center.clone().addScaledVector(job.left, x).addScaledVector(job.forward, job.halfL + 1.7).setY(spot.y);
+  }
+
+  // Steer round the car rather than through it: while it is in the box, a
+  // member whose straight line would cross it aims at the corner they are
+  // going round instead.
+  aimAt(m, job, want, solid) {
+    if (!solid) { m.round = 0; return want; }
+    const F = carFrame(job);
+    const a = toLocal(F, m.pos), b = toLocal(F, want);
+    if (insideBox(F, a) || insideBox(F, b) || !crossesBox(F, a, b)) { m.round = 0; return want; }
+    const w = roundTheCar(F, a, b, m.round);
+    m.round = w.dir;
+    // the first corner still ahead of them; standing on one is not a stop
+    for (const [cx, cz] of w.pts) if (Math.hypot(cx - a.x, cz - a.z) > 0.5) return toWorld(F, cx, cz, want.y);
+    return want;
+  }
+
   // The wheel a member is on at this moment (the stock crews do the right
   // side first, then run round to the left).
   wheelFor(m, job, a, D) {
@@ -301,8 +408,12 @@ export class PitCrews {
               const gunSpot = w.ground.clone().addScaledVector(w.out, 0.8);
               const carrySpot = w.ground.clone().addScaledVector(w.out, 1.05).addScaledVector(w.front ? fwd : back, 0.95);
               const toHub = w.hub.clone().sub(gunSpot).setY(0).normalize();
+              // where this one waits and retreats to, and which way they step
+              // off the car: outboard on the garage side, forward on the far one
+              const gunClear = this.stageSpot(job, gunSpot), carryClear = this.stageSpot(job, carrySpot);
+              const off = gunClear === gunSpot ? w.out : fwd;
               if (m.kind === 'gun') {
-                if (a < 0) { want = gunSpot; face = toHub; pose = 'ready'; speed = RUN; }
+                if (a < 0) { want = gunClear; face = a < -1.2 ? toHub : job.forward.clone().negate(); pose = 'ready'; speed = RUN; }
                 else if (a < s1 && a >= s0) {
                   want = gunSpot; face = toHub; speed = RUN;
                   const local = (a - s0) / Math.max(0.01, s1 - s0);
@@ -310,13 +421,14 @@ export class PitCrews {
                   pose = on ? 'gun' : 'gunUp';
                   if (on) work = { lugs: this.vehicle === 'formula' ? 1 : 5 };
                 } else if (a < D) { want = gunSpot; face = toHub; pose = 'gunUp'; speed = RUN; }
-                else if (a < D + 0.8) { want = gunSpot.clone().addScaledVector(w.out, 0.9); face = toHub; pose = 'release'; speed = STEP; }
-                else if (a < D + 2.6) { want = gunSpot.clone().addScaledVector(w.out, 0.9); face = fwd; pose = 'watch'; speed = STEP; }
+                else if (a < D + 0.8) { want = gunSpot.clone().addScaledVector(off, 0.9); face = toHub; pose = 'release'; speed = STEP; }
+                else if (a < D + 2.6) { want = gunClear; face = fwd; pose = 'watch'; speed = RUN; }
               } else {
                 // the carrier: waits with the fresh tyre, steps in for the swap, carries the old one off
                 const local = (a - s0) / Math.max(0.01, s1 - s0);
                 const swap = a >= s0 && a < s1 && local >= 0.34 && local < 0.72;
-                if (a < s0 || (a >= s0 && a < s1 && local < 0.34)) { want = carrySpot; face = toHub; pose = 'carry'; speed = RUN; }
+                if (a < 0) { want = carryClear; face = a < -1.2 ? toHub : job.forward.clone().negate(); pose = 'carry'; speed = RUN; }
+                else if (a < s0 || (a >= s0 && a < s1 && local < 0.34)) { want = carrySpot; face = toHub; pose = 'carry'; speed = RUN; }
                 else if (swap) {
                   const x = (local - 0.34) / 0.38; // 0..1 through the swap
                   want = w.ground.clone().addScaledVector(w.out, 0.95); face = toHub; pose = 'wheel'; speed = RUN;
@@ -325,7 +437,7 @@ export class PitCrews {
                   if (w.mesh) w.mesh.position.x = w.restX + w.outSign * 0.34 * slide;
                   const on = x < 0.5; if (m.tyreOn !== on) { m.tyreOn = on; rig.showProp('tyre', on); }
                 } else if (a < D) { want = carrySpot; face = toHub; pose = 'carry'; speed = STEP; if (!m.tyreOn) { m.tyreOn = true; rig.showProp('tyre', true); } }
-                else if (a < D + 2.6) { want = carrySpot.clone().addScaledVector(w.out, 0.8); face = fwd; pose = 'carry'; speed = STEP; }
+                else if (a < D + 2.6) { want = carryClear; face = fwd; pose = 'carry'; speed = RUN; }
               }
             }
           } else if (m.kind === 'fuel' && job.fuel) {
@@ -338,8 +450,11 @@ export class PitCrews {
             else if (a < D + 3.2) { want = job.chief; face = fwd; pose = 'chiefDown'; speed = STEP; }
           }
         }
-        // move toward the spot at this act's pace; the run clip fades in with the speed
-        const d = this.tmp.copy(want).sub(m.pos).setY(0);
+        // move toward the spot at this act's pace, round the car if it is in
+        // the way; the run clip fades in with the speed
+        const solid = !!job && a >= -0.45 && a <= D + 0.45;
+        const aim = solid ? this.aimAt(m, job, want, solid) : want;
+        const d = this.tmp.copy(aim).sub(m.pos).setY(0);
         const dist = d.length();
         let moving = 0;
         if (dist > 0.03) {
@@ -349,9 +464,20 @@ export class PitCrews {
           moving = stepLen / Math.max(dt, 1e-3);
           this.turn(m, d, dt);
           if (moving > 1.0) pose = m.kind === 'carry' ? 'carry' : 'stand';
-        } else {
+        } else if (aim === want) {
           m.pos.copy(want);
           this.turn(m, face, dt);
+        }
+        // Last word on it: nobody stands in the bodywork. The routing above
+        // keeps them out of it; this catches the corners it cannot, and
+        // slides them to the nearest way out.
+        if (solid) {
+          const F = carFrame(job), q = toLocal(F, m.pos);
+          if (insideBox(F, q)) {
+            const dx = F.hw - Math.abs(q.x), dz = F.hl - Math.abs(q.z);
+            if (dx < dz) m.pos.addScaledVector(job.left, Math.sign(q.x || 1) * dx);
+            else m.pos.addScaledVector(job.forward, Math.sign(q.z || 1) * dz);
+          }
         }
         rig.root.position.copy(m.pos);
         rig.setPose(pose);

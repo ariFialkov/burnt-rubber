@@ -139,8 +139,8 @@ export class CameraRig {
     } else if (tw < ps.tBox + 0.32 * D) {
       // from the back of the garage, over the crew's heads, as the car pulls in
       phase = 'garage';
-      const g = P.garages[Math.floor(ps.boxIdx / 2)];
-      pos = g.center.clone().addScaledVector(g.n, g.front + g.GD - 1.6).addScaledVector(g.t, ps.boxIdx % 2 ? 1.2 : -1.2).add(new THREE.Vector3(0, 2.9, 0));
+      const g = P.garages[ps.boxIdx];
+      pos = g.center.clone().addScaledVector(g.n, g.front + g.GD - 1.6).addScaledVector(g.t, 1.4).add(new THREE.Vector3(0, 2.9, 0));
       look = box.p.clone().lerp(carPos, 0.25).add(new THREE.Vector3(0, 0.5, 0)); fov = 66;
     } else if (tw < ps.tBox + 0.7 * D) {
       // a slow orbit above the box while the guns run

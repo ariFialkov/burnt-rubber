@@ -115,7 +115,12 @@ exactly to the scripted finish.
 
 **Pit stops.** The formula, stock and bike tours run four laps and every
 car comes in once, through a lane that peels off the inside of the start
-straight, at the end of lap one, two or three: the teams are dealt round
+straight, at the end of lap one, two or three. The lane has two lines: cars
+run down the fast lane, out toward the wall, and swing in to the box line
+only around their own box, which is what lets one go past another that is
+stopped. There is one box per team, in front of that team's garage and far
+enough from the next that a car can pull into its own past the ones already
+parked. The pit laps are dealt out per team: the teams are dealt round
 the windows in a seeded order with a team's two cars on consecutive ones,
 so the field is spread evenly and no garage ever has both its cars in the
 lane at once. Each pit lap has its own reference profile — the virtual pace
@@ -151,7 +156,12 @@ full: out of the garage on the run, down on the guns (the gun walking
 round the five lugs on a stock car, buzzing on a single nut on a formula
 car), the old wheel sliding off and the new one on, the release with both
 arms up, the wave, and the walk back with the old tyre; a fuel man holds
-the can in the tank door; the chief drops the board as the car goes. Each
+the can in the tank door on the garage side; the chief drops the board as
+the car goes. Nobody walks through the car: a member whose way to the far
+side would cross it is routed round an end — both ends of the walk are put
+on the car's perimeter and the shorter way round gives the corners to aim
+at — and anyone whose spot is on the lane side of the car waits level with
+the nose until it is in, rather than standing where it is about to be. Each
 crew member wears the number of the car they are serving on a badge on
 the chest (the rigs' atlases split the chest across islands, so it is a
 decal rather than an atlas overlay), and the crew serves the team's stops
@@ -182,6 +192,21 @@ choreography) is rate-limited — a bump that would be too steep starts
 earlier and fades later — so a charging car never exceeds about one and a
 half times the pace and nobody ever runs backwards. Drama only switches on
 once the field is up to speed.
+
+**Solid cars.** Nothing is ever drawn inside another car. The lateral pass
+eases cars apart across the road; where it has run out of road — a narrow
+stage with forty trucks on it, a pack three abreast — a bounded relaxation
+along the road makes the room instead, the car behind easing off and the one
+ahead pulling away, half each, at no more than a hard lift-off and never
+backwards. A car is never drawn more than a few lengths from where its
+script puts it, and that slack closes to nothing by the flag. Cars in the
+pit lane get the same treatment in the lane's own frame, where a car stopped
+in its box is the fixed point everything else works around. All of it moves
+only what is drawn: the scripted distances, and with them the race, are
+untouched. Two things feed it: in traffic a car holds its line instead of
+sweeping across to the racing line, and the drama harmonics scale with the
+field, because a swing that reads as a scrap in a ten-car race would have
+forty trucks eight metres apart passing through each other.
 
 **Steering.** A car's position across the road is not set, it is driven:
 sideways speed is a slip angle on the forward speed (a car on the grid

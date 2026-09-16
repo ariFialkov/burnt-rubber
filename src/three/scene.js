@@ -39,11 +39,11 @@ const noise1 = (x) => 0.55 * Math.sin(x) + 0.3 * Math.sin(2.31 * x + 1.3) + 0.15
 const UP = new THREE.Vector3(0, 1, 0);
 
 const HANDLING = {
-  formula: { slip: 0.16, aLat: 7 },
-  stock:   { slip: 0.12, aLat: 5 },
-  rally:   { slip: 0.22, aLat: 6 },
-  baja:    { slip: 0.20, aLat: 4.5 },
-  moto:    { slip: 0.15, aLat: 5 },
+  formula: { slip: 0.16, aLat: 13 },
+  stock:   { slip: 0.12, aLat: 9 },
+  rally:   { slip: 0.22, aLat: 11 },
+  baja:    { slip: 0.20, aLat: 8 },
+  moto:    { slip: 0.15, aLat: 9 },
 };
 
 export class RaceScene {
@@ -80,6 +80,10 @@ export class RaceScene {
     this.col = meta
       ? { len: meta.length * 0.48, width: meta.width * 0.45 }
       : (COLLIDERS[race.tour.vehicle] || COLLIDERS.formula);
+    // The bodywork itself. The collider above is what racing feels like —
+    // a shade tighter, so door-to-door reads as contact; the hull is what
+    // the eye sees, and nothing is ever drawn inside another car's hull.
+    this.hull = meta ? { len: meta.length / 2, width: meta.width / 2 } : { len: this.col.len, width: this.col.width };
     const colw = this.col.width;
     this.handling = HANDLING[race.tour.vehicle] || HANDLING.formula;
     this.body = BODY[race.tour.vehicle] || BODY.formula;
@@ -287,13 +291,16 @@ export class RaceScene {
   separate(dt) {
     const col = this.col;
     const minS = col.len * 2;      // combined half-lengths
-    const minN = col.width * 2;    // combined half-widths
+    // Settle on a real gap between the bodywork, not on the collider's
+    // slightly tighter idea of it: what this pass leaves alone is what the
+    // hard pass below would otherwise have to queue up.
+    const minN = Math.max(col.width * 2, this.hull.width * 2 + 0.1);
     // Settle a little wider than the trigger distance. Without this dead zone
     // the racing-line pull and the push would fight every frame and buzz;
     // with it, cars ease together and nudge apart in a slow, natural weave.
     const skin = 0.35;
     const bound = this.track.width / 2 - col.width - 0.4;
-    const maxLon = minS * 2;   // a boxed-in car may drop back this far
+    const maxLon = this.hull.len * 6;   // how far from its scripted place a car may be drawn
     // Start easing apart well before the boxes touch. The window is measured
     // in time-to-contact rather than distance: a car closing at 40 m/s needs
     // to start moving much earlier than one easing up at 5 m/s, and a fixed
@@ -305,8 +312,8 @@ export class RaceScene {
     const resort = () => this.order.sort((a, b) => cars[a].trackPos - cars[b].trackPos);
     resort();
 
-    // Lateral relaxation: three passes settle a dense pack without jitter.
-    for (let pass = 0; pass < 3; pass++) {
+    // Lateral relaxation: a few passes settle a dense pack without jitter.
+    for (let pass = 0; pass < 5; pass++) {
       this.eachNearPair(reach, (ci, cj, ds, i, j) => {
         const dn = cj.lane - ci.lane;
         const adn = Math.abs(dn);
@@ -380,29 +387,155 @@ export class RaceScene {
     // Only now do we know what actually stayed overlapped — those cars are
     // genuinely boxed in, so the trailing one queues up behind instead of
     // driving through. Checking before steering would miss them.
-    this.yieldBack(dt, maxLon);
+    this.solidify(dt, maxLon);
+
+    // Who has company: read once here, acted on by the racing-line drift on
+    // the next frame, which is near enough for something that changes over
+    // seconds.
+    for (const c of cars) c.crowded = false;
+    this.eachNearPair(minS * 2.4, (ci, cj) => {
+      if (Math.abs(cj.lane - ci.lane) >= minN * 1.7) return;
+      ci.crowded = true; cj.crowded = true;
+    });
   }
 
-  // For pairs the lateral pass could not separate, the track is full across:
-  // the trailing car backs off and queues up instead of driving through. Run
-  // between lateral passes so the next one sees the extra room.
-  yieldBack(dt, maxLon) {
-    const minS = this.col.len * 2;
-    const minN = this.col.width * 2;
-    // i runs behind j, so i is the one that lifts off.
-    this.eachNearPair(minS, (ci, cj, ds) => {
-      if (Math.abs(cj.lane - ci.lane) >= minN - 0.05) return; // it will clear across
-      const trail = cj.dist < ci.dist ? cj : ci;
-      const lead = trail === ci ? cj : ci;
-      const back = (minS + 0.3 - ds) * 0.6;
-      // Lifting off is only ever as abrupt as the closing speed calls for.
-      const rate = clamp(1.5 * Math.max(0, trail.speedS - lead.speedS) + 1, 1, 30);
-      // ...and never more than the car's own advance this frame, so lifting
-      // off means slowing, never rolling backwards.
-      const drop = Math.min(back, rate * dt, Math.max(0, trail.speed * dt * 0.9));
-      trail.lon = clamp(trail.lon - drop, -maxLon, 0);
-      trail.trackPos = this.trackPosOf(trail.dist + trail.lon);
-    });
+  // The last word on where a car is drawn: a relaxation that leaves no car
+  // inside another's bodywork. Where the lateral pass has run out of road —
+  // a narrow stage with forty trucks on it, a pack three abreast — the pair
+  // makes room along the road instead, the one behind easing off and the one
+  // ahead pulling out of the way, half each.
+  //
+  // Pairs are taken in the order the script has them, so the drawn field can
+  // never disagree with the leaderboard. The whole thing is bounded: a car
+  // is never drawn more than a few
+  // lengths from where its script puts it, that slack closes to nothing by
+  // the flag, and a car's own advance caps how hard it drops back, so
+  // queueing up means lifting off rather than snapping backwards. Only what
+  // is drawn moves — the scripted distance, and the race, are untouched.
+  solidify(dt, maxLon) {
+    const cars = this.cars;
+    const minS = this.hull.len * 2 + 0.3;
+    const minN = this.hull.width * 2 + 0.1;
+    const HORIZON = 0.45;  // seconds of lateral closing to allow for
+    const RATE = 26;       // m/s per second: the hardest a car is drawn easing either way
+    const lapLen = this.track.open ? Infinity : this.script.lapLen;
+    const end = this.script.totalDist;
+    const road = [];
+    for (const c of cars) {
+      if (c.pit?.inLane) continue;
+      // the room to play with shuts down as the car comes up on the flag
+      const room = maxLon * clamp((end - c.dist) / 120, 0, 1);
+      road.push({ car: c, key: c.dist, pos: c.dist + c.lon, lane: c.lane, vel: c.laneVel || 0, lo: c.dist - room, hi: c.dist + room });
+    }
+    // A car peeling into the pits or rejoining is still on the road over the
+    // ramps, and it is the one thing here that cannot be asked to move.
+    if (this.pits) for (const c of cars) {
+      const q = c.pit;
+      if (!q?.inLane || (q.f > 0.2 && q.f < 0.8)) continue;
+      const pos = q.dIn + q.f * this.script.pit.span;
+      road.push({ car: null, key: pos, pos, lane: this.pits.trackLaneAt(q.f), vel: 0, lo: pos, hi: pos });
+    }
+    road.sort((a, b) => b.key - a.key); // the car the script has in front, first
+    const reach = minS + 20;
+    for (let pass = 0; pass < 3; pass++) {
+      for (let a = 1; a < road.length; a++) {
+        const me = road[a];
+        for (let b = a - 1; b >= 0; b--) {
+          const up = road[b];
+          // on a loop, a lap apart is the same piece of road: measure the gap
+          // the short way round
+          let gap = up.pos - me.pos;
+          if (lapLen !== Infinity) gap = ((gap + lapLen / 2) % lapLen + lapLen) % lapLen - lapLen / 2;
+          if (gap > reach || gap < -reach) continue; // clear of this one
+          const dn = up.lane - me.lane;
+          if (Math.abs(dn) >= minN && Math.abs(dn + (up.vel - me.vel) * HORIZON) >= minN) continue;
+          // where the lane meets the road the two distances are only roughly
+          // the same measure, so a car peeling off gets a wider berth
+          const slack = up.car && me.car ? 0 : 4;
+          // room to breathe on top, so a car closing fast eases well before
+          // the bodywork would touch
+          const closing = clamp((me.car ? me.car.speedS : 0) - (up.car ? up.car.speedS : 0), 0, 14);
+          const err = minS + slack + Math.min(closing * 0.25, 2.2) - gap;
+          if (err <= 0) continue;
+          const upRoom = Math.max(0, up.hi - up.pos), meRoom = Math.max(0, me.pos - me.lo);
+          if (upRoom + meRoom < 1e-4) continue;
+          // share it out by who has room left; the one with none passes it on
+          const share = Math.min(err * (upRoom / (upRoom + meRoom)), upRoom);
+          up.pos += share;
+          me.pos = Math.max(me.lo, me.pos - (err - share));
+        }
+      }
+    }
+    for (const r of road) {
+      const c = r.car;
+      if (!c) continue;
+      const was = c.dist + c.lon;
+      const step = clamp(r.pos - was, -Math.min(RATE * dt, Math.max(0, c.speed * dt)), RATE * dt);
+      const pos = was + step;
+      c.lon = clamp(pos - c.dist, r.lo - c.dist, r.hi - c.dist);
+      c.trackPos = this.trackPosOf(c.dist + c.lon);
+    }
+  }
+
+  // Nose to tail down the pit lane. The lane compresses the field — a
+  // two-second gap on track is a car length here — so cars that would run
+  // into each other make room along the lane, the same bounded give and take
+  // as on the road. A car stopped in its box is the fixed point: it is where
+  // the script says it is, on the clock the crew and the stopwatch are
+  // working to, and everything else goes round or waits.
+  pitQueue(dt) {
+    const P = this.pits, pit = this.script.pit;
+    if (!P || !pit) return;
+    const lane = [];
+    for (const c of this.cars) {
+      if (!c.pit?.inLane) { c.pitHold = 0; continue; }
+      const raw = c.pit.f * pit.span, box = c.pit.boxF * pit.span;
+      // The room to play with shuts down over the last few metres into the
+      // box, is nil while the car is stopped in it, and is gone again by the
+      // end of the lane, where the car is handed back to the road and has to
+      // be exactly where the script left it.
+      const funnel = Math.min(clamp((Math.abs(box - raw) - 3) / 10, 0, 1), clamp((pit.span - raw) / 30, 0, 1));
+      const room = c.pit.stopped ? 0 : funnel * this.hull.len * 5;
+      // whatever is left of a hold eases off on its own once nothing is
+      // pressing; the relaxation below puts back what is still needed
+      const hold = Math.min((c.pitHold || 0) * Math.exp(-2.2 * dt), room);
+      lane.push({ car: c, raw, box, room, pos: raw - hold });
+    }
+    if (lane.length < 2) return;
+    const minS = this.hull.len * 2 + 0.5;
+    const minN = this.hull.width * 2 + 0.1;
+    const lat = (e) => P.latAt(e.pos / pit.span, e.car.pit.boxF);
+    // In the order they are actually in the lane, not the order the script
+    // sends them down it: a pit lane is a queue, nobody passes on the same
+    // line, and a place changing hands a moment late in here is invisible —
+    // where trying to swap two cars nose to tail would not be.
+    lane.sort((a, b) => b.pos - a.pos);
+    for (let pass = 0; pass < 3; pass++) {
+      for (let a = 1; a < lane.length; a++) {
+        const me = lane[a];
+        for (let b = a - 1; b >= 0; b--) {
+          const up = lane[b];
+          const gap = up.pos - me.pos;
+          if (gap > minS + 12) continue;                       // clear of this one
+          if (Math.abs(lat(up) - lat(me)) >= minN) continue;   // clear across the lane
+          const err = minS - gap;
+          if (err <= 0) continue;
+          const upRoom = Math.max(0, up.raw + up.room - up.pos), meRoom = Math.max(0, me.pos - (me.raw - me.room));
+          if (upRoom + meRoom < 1e-4) continue;
+          const share = Math.min(err * (upRoom / (upRoom + meRoom)), upRoom);
+          up.pos += share;
+          me.pos = Math.max(me.raw - me.room, me.pos - (err - share));
+        }
+      }
+    }
+    for (const e of lane) {
+      const prev = e.car.pitHold || 0;
+      const want = e.raw - e.pos;
+      // growing a hold is limited by the car's own advance, so it slows
+      // rather than snapping backwards; letting one go is quicker
+      e.car.pitHold = clamp(want, prev - 11 * dt, prev + Math.max(0, e.car.speedS * dt));
+      e.car.pit.f = clamp((e.raw - e.car.pitHold) / pit.span, 0, 1);
+    }
   }
 
   // mode: 'grid' | 'race'; tRace in seconds (may exceed script.T during cooldown)
@@ -433,6 +566,7 @@ export class RaceScene {
         car.lane = this.gridLane(script.gridSlotOf[i]);
         car.laneFresh = true;
         car.jumped = true; // don't draw a mark from wherever it was to here
+        car.prevPos = null; // ...and no drawn history to be held back by
       } else {
         // in the pit lane the script's kinematics are the truth, stop included
         const step = car.pit?.inLane ? 0 : minStep;
@@ -471,20 +605,24 @@ export class RaceScene {
         car.laneStart = car.lane;
         // Ease toward the racing line. This only seeds the goal the
         // separation pass refines; the steering step decides how much of it
-        // the car can actually do this frame.
-        car.lane += (car.wantLane - car.lane) * (1 - Math.exp(-3.5 * dt));
+        // the car can actually do this frame. In traffic the drift all but
+        // stops: a driver with a car alongside holds their line and waits
+        // for the road rather than sweeping across it, which is both what
+        // racing looks like and what stops the separation pass having to
+        // fight the racing line for the same piece of road.
+        car.lane += (car.wantLane - car.lane) * (1 - Math.exp(-(car.crowded ? 0.8 : 3.5) * dt));
         // Close back up behind a car once there is room, no faster than a
         // share of the car's own speed.
         const rec = (0 - car.lon) * (1 - Math.exp(-1.2 * dt));
-        const cap = (0.3 * car.speedS + 0.5) * dt;
+        const cap = (0.15 * car.speedS + 0.4) * dt;
         car.lon += clamp(rec, -cap, cap);
       }
       if (dist > maxD) { maxD = dist; this.leaderIdx = i; }
       if (dist < minD) { minD = dist; this.backIdx = i; }
     }
 
-    // Pass 2 — push apart anything that overlaps.
-    if (mode === 'race') this.separate(dt);
+    // Pass 2 — push apart anything that overlaps, on the road and in the lane.
+    if (mode === 'race') { this.separate(dt); this.pitQueue(dt); }
 
     // Position badges: the leaderboard's order, a few times a second.
     this.rankTimer -= dt;
@@ -502,6 +640,11 @@ export class RaceScene {
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i];
       const shown = car.dist + car.lon;
+      // How fast the car is actually drawn moving — which is what the wheels
+      // and the body should answer to, not the scripted pace, while it is
+      // queued up behind something.
+      car.drawSpeed = car.prevPos == null ? car.speed : Math.max(0, (shown - car.prevPos) / Math.max(dt, 1e-3));
+      car.prevPos = shown;
       let p, tangent, pos;
       if (car.pit?.inLane) {
         const C = this.pits.carAt(car.pit.f, car.pit.boxF);
@@ -539,7 +682,7 @@ export class RaceScene {
         for (let i = 0; i < cars.length; i++) {
           const ps = cars[i].pit;
           if (!ps || ps.tw < ps.tBox - 3.4 || ps.tw > ps.tLeave + 5.6) continue;
-          const g = Math.floor(ps.boxIdx / 2);
+          const g = ps.boxIdx; // one box, one garage, one crew per team
           const cur = due.get(g);
           const live = ps.tw < ps.tLeave + 0.3, curLive = cur && cur.ps.tw < cur.ps.tLeave + 0.3;
           if (!cur || (live && !curLive) || (live === curLive && (live ? ps.tBox < cur.ps.tBox : ps.tLeave > cur.ps.tLeave))) due.set(g, { i, ps });
@@ -734,7 +877,8 @@ export class RaceScene {
         w.position.y = w.userData.restY + amp * noise1(car.bumpPhase + k * 1.7 + car.bounceP);
       });
     }
-    for (const w of car.wheels) w.rotation.x -= Math.min(car.speed / (w.userData.radius || 0.45), WHEEL_OMEGA_MAX) * dt;
+    const roll = car.drawSpeed != null ? car.drawSpeed : car.speed;
+    for (const w of car.wheels) w.rotation.x -= Math.min(roll / (w.userData.radius || 0.45), WHEEL_OMEGA_MAX) * dt;
 
     // The steering wheel in the cockpit kit turns with the road ahead and
     // whatever the car is steering across, and the driver's hands go with it.
@@ -879,12 +1023,17 @@ export class RaceScene {
       wheels.push({ hub, ground, out: leftDir.clone().multiplyScalar(sx), outSign: sx, front: !!w.userData.front, mesh: w, restX: w.userData.restX ?? (w.userData.restX = w.position.x), tag: `${sx > 0 ? 'L' : 'R'}${w.userData.front ? 'F' : 'R'}` });
     }
     const vehicle = this.race.tour.vehicle;
+    // The garage side of the car, in its own +X terms: the fuel man works
+    // from the apron, never from the fast lane.
+    const garageSide = Math.sign(leftDir.dot(C.n)) || 1;
+    const toGarage = leftDir.clone().multiplyScalar(garageSide);
     let fuel = null;
-    if (vehicle === 'stock') fuel = { p: C.p.clone().addScaledVector(fwd, rearZ + 0.7).addScaledVector(leftDir, maxX + 0.15), out: leftDir.clone() };
-    if (vehicle === 'moto') fuel = { p: C.p.clone().addScaledVector(fwd, 0.15).addScaledVector(leftDir, 0.3), out: leftDir.clone() };
+    if (vehicle === 'stock') fuel = { p: C.p.clone().addScaledVector(fwd, rearZ + 0.7).addScaledVector(toGarage, maxX + 0.15), out: toGarage.clone() };
+    if (vehicle === 'moto') fuel = { p: C.p.clone().addScaledVector(fwd, 0.15).addScaledVector(toGarage, 0.3), out: toGarage.clone() };
     const chief = C.p.clone().addScaledVector(fwd, car.length / 2 + 2.0).addScaledVector(C.n, -0.9);
     const r = this.race.field[i];
-    return { carIdx: i, number: r ? r.number : null, tArrive: ps.tBox, tLeave: ps.tLeave, wheels, forward: fwd, left: leftDir, fuel, chief, chiefLook: C.p.clone() };
+    return { carIdx: i, number: r ? r.number : null, tArrive: ps.tBox, tLeave: ps.tLeave, wheels, forward: fwd, left: leftDir, n: C.n.clone(), garageSide,
+      center: C.p.clone(), halfL: car.length / 2, halfW: Math.max(maxX + 0.2, this.col.width), fuel, chief, chiefLook: C.p.clone() };
   }
 
   // Point sprites need the viewport to size themselves in metres.

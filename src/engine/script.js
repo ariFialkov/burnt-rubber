@@ -34,15 +34,20 @@ export const GRID_PITCH = { formula: 7, stock: 6, rally: 6, moto: 4.5, baja: 7 }
 // a lane that spans `span` metres of track distance around the start line.
 // `vLane` is the lane speed limit; the stationary stop time per car is drawn
 // log-normally around `median` (so the over/under `line` prices from the
-// same distribution the stop is drawn from). A car brakes from race pace
+// same distribution the stop is drawn from). `boxPitch` is the spacing of
+// the boxes down the lane — one box per team, in front of that team's
+// garage, which is how a real pit lane is laid out and what leaves a car
+// room to pull into its own box past the ones already parked. A team's two
+// cars pit on different laps, so they never want it at once. A car brakes
+// from race pace
 // to the lane limit at `brakeA` (m/s²) once it is on the entry ramp, and
 // pulls away from the lane end at `accelA` back up to pace; `brake` and
 // `launch` are its seconds from lane speed to a standstill at its box and
 // back up to lane speed.
 export const PIT = {
-  formula: { span: 230, vLane: 24, line: 2.5, median: 2.62, sigma: 0.22, brakeA: 60, accelA: 12, boxFrom: 0.3, boxPitch: 6, brake: 1.1, launch: 1.6 },
-  stock:   { span: 230, vLane: 24, line: 4.5, median: 4.7, sigma: 0.2, brakeA: 55, accelA: 13, boxFrom: 0.31, boxPitch: 6, brake: 1.2, launch: 2.0 },
-  moto:    { span: 190, vLane: 18, line: 3.5, median: 3.66, sigma: 0.22, brakeA: 40, accelA: 11, boxFrom: 0.3, boxPitch: 5, brake: 1.1, launch: 1.8 },
+  formula: { span: 230, vLane: 24, line: 2.5, median: 2.62, sigma: 0.22, brakeA: 60, accelA: 12, boxFrom: 0.3, boxPitch: 15, brake: 1.1, launch: 1.6 },
+  stock:   { span: 230, vLane: 24, line: 4.5, median: 4.7, sigma: 0.2, brakeA: 55, accelA: 13, boxFrom: 0.31, boxPitch: 15, brake: 1.2, launch: 2.0 },
+  moto:    { span: 190, vLane: 18, line: 3.5, median: 3.66, sigma: 0.22, brakeA: 40, accelA: 11, boxFrom: 0.3, boxPitch: 11, brake: 1.1, launch: 1.8 },
 };
 
 // Standard normal tail via erf.
@@ -135,13 +140,16 @@ export function getScript(race) {
   // lap gets its own reference profile; all of them cost exactly the same
   // time, so they coincide again once the last lane is done and the
   // scripted gaps mean the same thing at the flag whatever lap a car chose.
-  const pitSpec = race.tour.laps > 2 ? PIT[race.tour.vehicle] || null : null;
+  let pitSpec = race.tour.laps > 2 ? PIT[race.tour.vehicle] || null : null;
   let pit = null;
   if (pitSpec) {
     // Windows: the end of every lap but the last (the lane rejoins well
     // before the line, so even a last-lap stop is done before the flag).
     const dInAt = (k) => k * lapLen - 0.55 * pitSpec.span;
     const windows = race.tour.laps - 1;
+    const nTeams = new Set(race.field.map((r) => r.team)).size;
+    // the last box has to leave room to get going again before the lane ends
+    pitSpec = { ...pitSpec, boxPitch: Math.min(pitSpec.boxPitch, (pitSpec.span * (0.92 - pitSpec.boxFrom)) / Math.max(1, nTeams - 1)) };
     const dMean = pitSpec.median * Math.exp(pitSpec.sigma * pitSpec.sigma / 2);
     const { span, vLane, brakeA, accelA, brake, launch } = pitSpec;
     // braking on the entry ramp, and the pull-away past the lane end
@@ -234,10 +242,22 @@ export function getScript(race) {
 
   // --- Drama harmonics per racer (inconsistent racers swing harder).
   const harmonics = race.field.map((r, i) => {
-    const amp = (0.5 + (1 - r.stats.consistency / 100) * 1.6) * (n > 20 ? 1.5 : 1);
+    // A swing is worth the same in seconds whatever the field size, but the
+    // road is not: forty trucks are drawn eight metres apart, so a swing that
+    // reads as a scrap in a ten-car race would have them passing through each
+    // other here. Big fields swing less, and the racing stays on the road.
+    // A swing is worth the same in seconds whatever the field size, but the
+    // road is not: forty trucks are drawn eight metres apart, so a swing that
+    // reads as a scrap in a ten-car race would have them passing through each
+    // other here. Big fields swing less, and slower — the closing speed a
+    // harmonic implies is its amplitude times its frequency, and a car
+    // arriving twenty-odd miles an hour faster than the one it is passing
+    // cannot be given room in time on a stage road.
+    const crowd = clamp(14 / n, 0.5, 1.2);
+    const amp = (0.5 + (1 - r.stats.consistency / 100) * 1.6) * crowd;
     const parts = [];
     for (let j = 0; j < 3; j++) {
-      parts.push({ a: amp * (0.35 + rand() * 0.65) / 3, f: 0.7 + rand() * 2.2, ph: rand() * Math.PI * 2 });
+      parts.push({ a: amp * (0.35 + rand() * 0.65) / 3, f: (0.7 + rand() * 2.2) * clamp(crowd * 1.15, 0.55, 1), ph: rand() * Math.PI * 2 });
     }
     return parts;
   });
@@ -340,7 +360,7 @@ export function getScript(race) {
   // stop depends on the gap curve it is running (the focus layer adjusts
   // gaps), so it is resolved per adjustment and cached.
   const teams = []; const boxOf = new Array(n); const lapOf = new Array(n).fill(0);
-  race.field.forEach((r, i) => { let k = teams.indexOf(r.team); if (k < 0) { k = teams.length; teams.push(r.team); } boxOf[i] = k * 2 + race.field.slice(0, i).filter((q) => q.team === r.team).length; });
+  race.field.forEach((r, i) => { let k = teams.indexOf(r.team); if (k < 0) { k = teams.length; teams.push(r.team); } boxOf[i] = k; });
   const stopOf = new Array(n).fill(0);
   if (pit) {
     // Pit laps: teams dealt round the windows in a seeded order, a team's
