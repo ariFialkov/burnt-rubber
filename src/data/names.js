@@ -25,6 +25,42 @@ export const NATIONS = [
 export const TEAM_WORDS_A = ['Apex', 'Vortex', 'Ignition', 'Redline', 'Slipstream', 'Titan', 'Nitro', 'Phantom', 'Ember', 'Quantum', 'Falcon', 'Cobalt', 'Onyx', 'Solar', 'Rogue', 'Delta', 'Hyper', 'Iron', 'Comet', 'Storm'];
 export const TEAM_WORDS_B = ['Racing', 'Motorsport', 'GP', 'Works', 'Performance', 'Dynamics', 'Speedworks', 'Factory', 'Crew', 'Garage', 'Syndicate', 'Autosport'];
 
+// Team palettes: three colours — primary accent, secondary accent, and the
+// base bodywork colour (what the atlas paints white). Generated so every
+// team in a bank is distinct: hues step round the wheel by the golden
+// angle, bases cycle through a curated set, and the secondary is either a
+// complementary hue or a neutral, keeping contrast against the base.
+const BASES = [
+  ['#f2f2f2', 'Pearl'], ['#141416', 'Jet'], ['#c8ccd2', 'Silver'], ['#0b1f4b', 'Navy'], ['#f4ead6', 'Cream'],
+  ['#3a3d42', 'Gunmetal'], ['#5e0b15', 'Oxblood'], ['#0f3d2e', 'Racing Green'], ['#e8c547', 'Gold'], ['#1b1b2f', 'Midnight'],
+  ['#d9d2c5', 'Bone'], ['#2a1a3d', 'Plum'], ['#f7f7f7', 'White'], ['#26262a', 'Carbon'], ['#b8c4cc', 'Ice'],
+];
+const HUE_NAMES = [[15, 'Crimson'], [40, 'Orange'], [62, 'Amber'], [85, 'Lime'], [150, 'Green'], [175, 'Teal'], [195, 'Cyan'], [225, 'Azure'], [255, 'Blue'], [285, 'Violet'], [320, 'Magenta'], [345, 'Pink'], [361, 'Crimson']];
+const hueName = (h) => HUE_NAMES.find(([lim]) => h < lim)[1];
+const hsl = (h, s, l) => {
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = l - c / 2;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return '#' + [r, g, b].map((v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')).join('');
+};
+const lumOf = (hex) => { const n = parseInt(hex.slice(1), 16); return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; };
+export function teamPalette(i) {
+  const hue = (i * 137.508 + 8) % 360;
+  // hues nearly repeat every 21 teams; alternating light and dark bases
+  // keeps two teams that share a hue from looking like one outfit
+  const LIGHT = BASES.filter(([hex]) => lumOf(hex) > 0.5), DARK = BASES.filter(([hex]) => lumOf(hex) <= 0.5);
+  const pool = i % 2 === 0 ? LIGHT : DARK;
+  const [base, baseName] = pool[Math.floor(i / 2) % pool.length];
+  const light = lumOf(base) > 0.5;
+  // yellows and limes go neon at full saturation: keep them a shade deeper
+  const warm = hue > 45 && hue < 110;
+  const primary = hsl(hue, warm ? 0.78 : 0.86, light ? (warm ? 0.42 : 0.44) : (warm ? 0.5 : 0.56));
+  const mode = i % 3;
+  const secondary = mode === 0 ? hsl((hue + 180 + ((i * 53) % 50) - 25 + 360) % 360, 0.8, light ? 0.42 : 0.62) : mode === 1 ? (light ? '#141416' : '#f4f4f4') : hsl((hue + 40) % 360, 0.9, 0.55);
+  let name = hueName(hue);
+  if (baseName.includes(name)) name = hueName((hue + 40) % 360); // "Racing Green Green" reads badly
+  return { colors: [primary, secondary, base], paletteName: `${baseName} ${name}` };
+}
+
 export const TEAM_COLORS = [
   ['#e10600', '#ffffff'], ['#0090ff', '#ffd12a'], ['#00d2be', '#111111'], ['#ff8700', '#1b1b2f'],
   ['#9b30ff', '#e8e8e8'], ['#2ecc40', '#0b3d1e'], ['#ffdc00', '#111111'], ['#ff2d95', '#22042f'],

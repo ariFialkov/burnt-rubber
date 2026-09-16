@@ -233,6 +233,25 @@ live: needles follow speed and revs, the gear steps with speed, the lap
 and fuel count down, warning lamps light for braking, rain and low fuel,
 and the formula wheel's shift lights fill with the revs and show DRS.
 
+**Liveries, palettes and numbers.** Every team has a three-colour palette
+(`teamPalette` in `src/data/names.js`): a primary and secondary accent and
+a base bodywork colour, generated so every team in a bank is distinct —
+hues step round the wheel by the golden angle, bases cycle a curated set
+(pearl, jet, silver, navy, cream, gunmetal, oxblood, racing green, gold…),
+and the secondary is a complement or a neutral chosen for contrast against
+the base. Each palette carries a name (`racer.palette`, e.g. "Navy Teal")
+for the UI. The livery shader remaps the atlas's two accent hues to the
+primary and secondary as before, and now also repaints the atlas's white
+bodywork in the base colour, keeping the baked shading, so the whole field
+reads as different teams rather than one white car in accent trims. The
+racing numbers on the bodywork are the drivers' own: `src/three/numbers.js`
+lists where each atlas has a number baked in (rectangles and how the glyph
+is turned there) and draws a small per-car overlay — a plate tile per
+rectangle with the driver's number in the same orientation — that the
+shader paints over the atlas; 128 px per plate instead of a per-car
+atlas. The formula car, which has no baked number, carries decals seated
+on the nose and both sidepods by raycast.
+
 **Trackside and scenery.** `src/three/trackside.js` builds the grandstands
 as one stepped concrete tier (an extruded profile) with seat strips, an
 advertising board, a back wall and a roof on columns, and fills them with a

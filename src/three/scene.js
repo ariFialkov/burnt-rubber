@@ -91,7 +91,7 @@ export class RaceScene {
     const laneSpan = Math.max(1, track.width / 2 - colw - 0.5);
     this.laneSpan = laneSpan;
     this.cars = race.field.map((r, i) => {
-      const built = buildModelCar(race.tour.vehicle, r.colors) || (() => {
+      const built = buildModelCar(race.tour.vehicle, r.colors, r.number) || (() => {
         const c = buildCar(race.tour.vehicle, r.colors);
         c.group.add(shadowBlob(this.col.width * 2, this.col.len * 2));
         return { ...c, meta: null };

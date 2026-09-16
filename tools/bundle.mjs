@@ -91,7 +91,7 @@ const FILES = [
   'src/engine/schedule.js', 'src/engine/odds.js', 'src/engine/script.js', 'src/engine/bets.js',
   'src/three/flora.js', 'src/three/trackside.js', 'src/three/dressing.js', 'src/three/terrain.js', 'src/three/trackGen.js', 'src/three/carFactory.js', 'src/three/scene.js', 'src/three/cameras.js',
   'src/ui/avatars.js', 'src/ui/hub.js', 'src/ui/slip.js', 'src/ui/board.js', 'src/ui/live.js',
-  'src/ui/garage.js', 'src/ui/mybets.js', 'src/ui/tickets.js', 'src/three/models.js', 'src/three/cockpit.js', 'src/three/effects.js', 'src/main.js',
+  'src/ui/garage.js', 'src/ui/mybets.js', 'src/ui/tickets.js', 'src/three/numbers.js', 'src/three/models.js', 'src/three/cockpit.js', 'src/three/effects.js', 'src/main.js',
   'vendor/jsm/loaders/GLTFLoader.js', 'vendor/jsm/utils/BufferGeometryUtils.js',
   'vendor/jsm/environments/RoomEnvironment.js',
 ];

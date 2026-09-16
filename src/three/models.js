@@ -8,6 +8,7 @@
 // the two livery materials are per car.
 
 import * as THREE from 'three';
+import { numberOverlay, numberDecal } from './numbers.js';
 import { cockpitFor } from './cockpit.js';
 import { GLTFLoader } from '../../vendor/jsm/loaders/GLTFLoader.js';
 
@@ -242,12 +243,23 @@ const RECOLOR = `
     vec3 shaded = team * clamp(hsv.z * 1.15, 0.0, 1.0);
     return mix(c, shaded, w);
   }
+  // The light neutrals — the atlas's white bodywork — take the base colour,
+  // keeping the baked shading and a touch of highlight so a dark base still
+  // reads its panel lines.
+  vec3 br_rebase(vec3 c, vec3 base, float on) {
+    if (on < 0.5) return c;
+    vec3 hsv = br_rgb2hsv(c);
+    float w = (1.0 - smoothstep(0.10, 0.22, hsv.y)) * smoothstep(0.50, 0.72, hsv.z);
+    vec3 shaded = base * clamp(hsv.z * 1.05, 0.0, 1.0) + vec3(0.10) * max(0.0, hsv.z - 0.86) * 6.0;
+    return mix(c, shaded, w);
+  }
 `;
 
-export function liveryMaterial(vehicle, colors) {
+export function liveryMaterial(vehicle, colors, number = null) {
   const l = liveries.get(vehicle);
   if (!l) return null;
   if (!l.accents) refreshAccents(vehicle);
+  const overlay = number != null ? numberOverlay(vehicle, number, colors) : null;
   const m = new THREE.MeshStandardMaterial({
     map: l.base,
     normalMap: l.normal || null, normalScale: new THREE.Vector2(0.8, 0.8),
@@ -258,16 +270,32 @@ export function liveryMaterial(vehicle, colors) {
   const u = {
     uPrimHue: { value: l.accents[0] }, uSecHue: { value: l.accents[1] },
     uPrim: { value: new THREE.Color(colors[0]) }, uSec: { value: new THREE.Color(colors[1]) },
+    // the base bodywork (what the atlas paints white) takes the palette's third colour
+    uBase: { value: new THREE.Color(colors[2] || '#ffffff') }, uBaseOn: { value: colors[2] ? 1 : 0 },
+    uNumMap: { value: overlay ? overlay.texture : null },
+    uRects: { value: overlay ? overlay.rects : [0, 1, 2, 3].map(() => new THREE.Vector4(-1, -1, -1, -1)) },
+    uRectN: { value: overlay ? overlay.count : 0 },
   };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform float uPrimHue, uSecHue; uniform vec3 uPrim, uSec;${RECOLOR}`)
+      .replace('#include <common>', `#include <common>\nuniform float uPrimHue, uSecHue, uBaseOn, uRectN; uniform vec3 uPrim, uSec, uBase; uniform sampler2D uNumMap; uniform vec4 uRects[4];${RECOLOR}`)
       .replace('#include <map_fragment>', `#include <map_fragment>
+        float br_atlasV = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b);
         diffuseColor.rgb = br_recolor(diffuseColor.rgb, uPrimHue, uPrim);
-        diffuseColor.rgb = br_recolor(diffuseColor.rgb, uSecHue, uSec);`);
+        diffuseColor.rgb = br_recolor(diffuseColor.rgb, uSecHue, uSec);
+        diffuseColor.rgb = br_rebase(diffuseColor.rgb, uBase, uBaseOn);
+        for (int k = 0; k < 4; k++) {
+          if (float(k) >= uRectN) break;
+          vec4 rc = uRects[k];
+          if (vMapUv.x >= rc.x && vMapUv.x <= rc.z && vMapUv.y >= rc.y && vMapUv.y <= rc.w) {
+            vec2 l = (vMapUv - rc.xy) / (rc.zw - rc.xy);
+            vec4 n = texture2D(uNumMap, vec2(l.x, (float(k) + l.y) / 4.0));
+            diffuseColor.rgb = mix(diffuseColor.rgb, n.rgb, n.a); // a clean plate: the baked digits must not ghost through
+          }
+        }`);
   };
-  m.customProgramCacheKey = () => 'br-livery'; // one program for the whole field
+  m.customProgramCacheKey = () => 'br-livery-v2'; // one program for the whole field
   return m;
 }
 
@@ -376,12 +404,12 @@ function rider(primary, secondary, meta) {
 
 // Build a car from a loaded template. Returns null if the model isn't
 // available so the caller can fall back to the procedural car.
-export function buildModelCar(vehicle, colors) {
+export function buildModelCar(vehicle, colors, number = null) {
   const t = templates.get(vehicle);
   if (!t) return null;
   const [primary, secondary] = colors;
   const group = new THREE.Group();
-  const livery = hasLivery(vehicle) ? liveryMaterial(vehicle, colors) : null;
+  const livery = hasLivery(vehicle) ? liveryMaterial(vehicle, colors, number) : null;
   const paint = livery || new THREE.MeshStandardMaterial({ color: primary, metalness: 0.35, roughness: 0.32, envMap });
   const trim = livery || new THREE.MeshStandardMaterial({ color: secondary, metalness: 0.3, roughness: 0.4, envMap });
   const glazing = vehicle === 'moto' ? SHARED.screen : SHARED.tint;
@@ -479,5 +507,28 @@ export function buildModelCar(vehicle, colors) {
     lamp(geo, 0, vehicle === 'formula' ? 0.56 : Hh * 0.78, vehicle === 'formula' ? 0.36 : 0.26);
   }
   group.add(shadowBlob(t.meta.width, t.meta.length));
+  // The formula car has no number painted into its atlas: decals seated on
+  // the nose and both sidepods carry the driver's number instead.
+  if (vehicle === 'formula' && number != null) {
+    const tex = numberDecal(number, colors);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, alphaTest: 0.15, roughness: 0.55, metalness: 0.1, envMap, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide });
+    const decal = (origin, dir, size, upHint) => {
+      ray.set(origin, dir);
+      const h = ray.intersectObjects(bodies, false)[0];
+      if (!h) return;
+      const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+      d.name = 'decal';
+      d.position.copy(h.point).addScaledVector(n, 0.012);
+      // face along the surface normal with the digits' top toward upHint
+      const z = n, x = new THREE.Vector3().crossVectors(upHint, z).normalize(), y = new THREE.Vector3().crossVectors(z, x);
+      d.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+      group.add(d);
+    };
+    decal(new THREE.Vector3(0, Hh + 2, L * 0.62), new THREE.Vector3(0, -1, 0), 0.3, new THREE.Vector3(0, 0, -1));
+    decal(new THREE.Vector3(Wd + 2, Hh * 0.5, -L * 0.02), new THREE.Vector3(-1, 0, 0), 0.34, new THREE.Vector3(0, 1, 0));
+    decal(new THREE.Vector3(-Wd - 2, Hh * 0.5, -L * 0.02), new THREE.Vector3(1, 0, 0), 0.34, new THREE.Vector3(0, 1, 0));
+  }
+
   return { group, wheels, lamps, meta: t.meta };
 }

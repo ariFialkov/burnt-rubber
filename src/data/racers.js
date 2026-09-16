@@ -2,7 +2,7 @@
 // racers, generated deterministically (same bank for every player, forever).
 
 import { rngFor, pick } from '../core/rng.js';
-import { NATIONS, TEAM_WORDS_A, TEAM_WORDS_B, TEAM_COLORS } from './names.js';
+import { NATIONS, TEAM_WORDS_A, TEAM_WORDS_B, teamPalette } from './names.js';
 import { TOURS } from './tours.js';
 
 function buildBank(tour) {
@@ -22,7 +22,7 @@ function buildBank(tour) {
       name = `${pick(rand, TEAM_WORDS_A)} ${pick(rand, TEAM_WORDS_B)}`;
     } while (usedTeamNames.has(name));
     usedTeamNames.add(name);
-    teams.push({ name, colors: TEAM_COLORS[i % TEAM_COLORS.length] });
+    teams.push({ name, ...teamPalette(i) });
   }
 
   for (let i = 0; i < count; i++) {
@@ -62,6 +62,7 @@ function buildBank(tour) {
       number,
       team: team.name,
       colors: team.colors,
+      palette: team.paletteName,
       stats: { pace, consistency, aggression, craft },
       // Overall strength drives the odds model. Exponential-ish spread makes a
       // real odds landscape: clear favorites, mid-pack, and longshots.
