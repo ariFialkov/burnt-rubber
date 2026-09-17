@@ -34,6 +34,7 @@ deterministic seed, it works fully offline.
 
 ```sh
 npm run build          # -> build/            an uploadable copy of the site
+npm run build:portable # -> build/            the same, with no .glb files
 npm run build:single   # -> dist/burnt-rubber.html   the whole game in one file
 ```
 
@@ -41,8 +42,18 @@ npm run build:single   # -> dist/burnt-rubber.html   the whole game in one file
 `manifest.webmanifest`, since many hosts reject that extension — the file is
 plain JSON either way and only the `<link rel="manifest">` matters. It prints
 every file type in the output so you can check it against a host's allowed
-extensions before uploading. Neither command needs `npm install`; there are no
+extensions before uploading. None of these need `npm install`; there are no
 dependencies.
+
+`npm run build:portable` is for hosts whose upload filter rejects `.glb`. Each
+model ships as a `.js` file instead — a one-line script that assigns its bytes
+(base64) into `window.__BR_MODELS__`, which is the same hand-off the
+single-file bundle already uses, so the loader parses from memory rather than
+fetching. The scripts are deferred and sit ahead of the module in `index.html`,
+so they have run by the time the game asks for a model, and the service worker
+precaches them in place of the `.glb` files. The output is then nothing but
+`.html`, `.css`, `.js`, `.json`, `.jpg`, `.png` and `.svg`. Base64 costs about
+a third on those files: 10.2 MB becomes 11.9 MB.
 
 `build:single` inlines three.js and every module into one `.html` file with no
 other requests at all — the fallback when a host only accepts a single page or

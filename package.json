@@ -2,11 +2,12 @@
   "name": "burnt-rubber",
   "version": "1.0.0",
   "private": true,
-  "description": "A 3D racing sportsbook PWA — five tours of endless live races you bet on.",
+  "description": "A 3D racing sportsbook PWA \u2014 five tours of endless live races you bet on.",
   "type": "module",
   "scripts": {
     "start": "python3 -m http.server 8000",
     "build": "node tools/build.mjs",
+    "build:portable": "node tools/build.mjs --js-models",
     "build:single": "node tools/bundle.mjs",
     "models": "node tools/convert-models.mjs"
   }

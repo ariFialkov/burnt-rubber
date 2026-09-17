@@ -40,6 +40,7 @@ const ASSETS = [
   'src/ui/tickets.js',
   'src/three/numbers.js',
   'src/three/models.js',
+  'src/three/crewRig.js',
   'src/three/cockpit.js',
   'src/three/effects.js',
   'vendor/jsm/loaders/GLTFLoader.js',
