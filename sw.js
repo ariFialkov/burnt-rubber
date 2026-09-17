@@ -2,7 +2,7 @@
 // the freshly deployed build, offline the cached copy plays fully (the whole
 // game is static and deterministic — races run off the world clock).
 
-const CACHE = 'burnt-rubber-v20';
+const CACHE = 'burnt-rubber-v21';
 const ASSETS = [
   '.',
   'index.html',

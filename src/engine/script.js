@@ -481,7 +481,7 @@ export function getScript(race) {
     paceSpeed, paceDist, paceTime, gapScale, warp,
     shape, upToSpeed, maxAmp,
     grid, gridSlotOf, finishOrder, finalGap, margin,
-    holeshotIdx, fastestLapIdx, fastestLapS,
+    holeshotIdx, fastestLapIdx, fastestLapS, lap1S,
     gapSec, pit, pitFor, pitReset: (adj) => { pitCache.delete(adj || 'base'); }, stopOf, boxOf, lapOf, teams, offsetMetres, preRise,
     // Distance along the track in metres at race-time t (seconds), with the
     // start line at 0. At t=0 every car sits in its grid slot; in its pit
@@ -581,6 +581,9 @@ export function getFocusLayer(race, focusIdx) {
       text: (f) => `${f.short} pits: stop time over ${P.line.toFixed(1)}s?`,
       offerS: Math.max(0.05, sIn - 8 / T), s0: sIn, s1: pitInfo.tLeave / T,
       result: pitInfo.D > P.line,
+      // The stopwatch stops when the car pulls away: the bet is decided there,
+      // not at the flag.
+      decideS: pitInfo.tLeave / T,
     });
   }
 
@@ -666,21 +669,29 @@ export function getFocusLayer(race, focusIdx) {
     if (pu.kind === 'pit') continue;
     let happened = false;
     const steps = 60;
+    // decideS: the moment the screen settles it — a hold dies the instant the
+    // place is lost, a surge lands the instant it lands, and a bet that never
+    // comes in is only decided when its window shuts.
+    let decideS;
     if (pu.kind === 'hold') {
       happened = true;
+      decideS = pu.s1;
       for (let k = 0; k <= steps; k++) {
         const s = lerp(pu.s0, pu.s1, k / steps);
-        if (script.standings(s, adj).indexOf(pu.focusIdx) + 1 > pu.rankToHold) { happened = false; break; }
+        if (script.standings(s, adj).indexOf(pu.focusIdx) + 1 > pu.rankToHold) { happened = false; decideS = s; break; }
       }
     } else {
+      const sEnd = pu.s1 + (pu.kind === 'overtake' ? 0.1 : 0.06);
+      decideS = sEnd;
       for (let k = 0; k <= steps; k++) {
-        const s = lerp(pu.s0, pu.s1 + (pu.kind === 'overtake' ? 0.1 : 0.06), k / steps);
+        const s = lerp(pu.s0, sEnd, k / steps);
         const rk = script.standings(s, adj).indexOf(pu.focusIdx) + 1;
-        if (pu.kind === 'overtake' && script.standings(s, adj).indexOf(pu.targetIdx) > script.standings(s, adj).indexOf(pu.focusIdx)) { happened = true; break; }
-        if (pu.kind === 'reach' && rk <= pu.targetRank) { happened = true; break; }
+        if (pu.kind === 'overtake' && script.standings(s, adj).indexOf(pu.targetIdx) > script.standings(s, adj).indexOf(pu.focusIdx)) { happened = true; decideS = s; break; }
+        if (pu.kind === 'reach' && rk <= pu.targetRank) { happened = true; decideS = s; break; }
       }
     }
     pu.result = happened;
+    pu.decideS = decideS;
   }
 
   // The pit timings cached against this adjustment were resolved while its

@@ -159,9 +159,10 @@ function frame(nowMs) {
   const now = Date.now();
   const states = allTourStates(now);
 
-  // Settle finished bets + broke check (every 2s)
+  // Settle decided bets + broke check (twice a second, so in-race side bets
+  // land the moment the screen shows them)
   settleTimer += dt;
-  if (settleTimer > 2) {
+  if (settleTimer > 0.5) {
     settleTimer = 0;
     const settled = settleDue(now);
     for (const b of settled) {

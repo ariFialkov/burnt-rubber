@@ -84,8 +84,35 @@ export function placeBet(legs, stake, kind = legs.length > 1 ? 'parlay' : 'singl
 
 function legRace(leg) { return raceFor(leg.tourId, leg.cycle); }
 
+// When a leg's result is settled on screen. Most markets need the flag, but
+// the in-race side bets are decided long before it — a pit stop's clock stops
+// when the car pulls away, a "hold P4" dies the moment the place is lost — and
+// waiting for the flag to pay those out makes fast sequential betting a chore.
+// A small pad keeps the payout just behind the moment the viewer sees it.
+const DECIDE_PAD = 0.8;
+
+function legDecidedAt(leg) {
+  const times = raceTimes(leg.tourId, leg.cycle);
+  if (leg.market !== 'popup' && leg.market !== 'holeshot') return times.finish;
+  try {
+    const race = legRace(leg);
+    const script = getScript(race);
+    let s = null;
+    if (leg.market === 'holeshot') {
+      s = script.lap1S;
+    } else {
+      const pu = getFocusLayer(race, leg.focusIdx).popups.find((p) => p.id === leg.popupId);
+      if (pu) s = pu.decideS != null ? pu.decideS : pu.s1;
+    }
+    if (s == null) return times.finish;
+    return Math.min(times.finish, times.green + (s * script.T + DECIDE_PAD) * 1000);
+  } catch {
+    return times.finish;
+  }
+}
+
 function legFinished(leg, now) {
-  return now >= raceTimes(leg.tourId, leg.cycle).finish;
+  return now >= legDecidedAt(leg);
 }
 
 function legResult(leg) {
@@ -158,7 +185,8 @@ export function settleDue(now = Date.now()) {
 export function focusRacerIdx(race) {
   let best = null;
   for (const bet of store.bets) {
-    if (bet.status !== 'open') continue;
+    // Not open-only: a side bet that settles mid-race must not move the camera
+    // off the racer it was placed on. The cycle match already scopes this race.
     for (const leg of bet.legs) {
       if (leg.tourId === race.tourId && leg.cycle === race.cycle && leg.racerId) {
         const idx = race.field.findIndex((r) => r.id === leg.racerId);
@@ -173,6 +201,13 @@ export function focusRacerIdx(race) {
 
 export function openBetsFor(race) {
   return store.bets.filter((b) => b.status === 'open' && b.legs.some((l) => l.tourId === race.tourId && l.cycle === race.cycle));
+}
+
+// Bets on this race for the live rail: still running, plus ones that just
+// landed, so a mid-race result is seen hitting rather than silently vanishing.
+export function liveBetsFor(race, now = Date.now(), holdMs = 12000) {
+  return store.bets.filter((b) => b.legs.some((l) => l.tourId === race.tourId && l.cycle === race.cycle)
+    && (b.status === 'open' || (b.settledAt && now - b.settledAt < holdMs)));
 }
 
 export function sponsoredRacers() {

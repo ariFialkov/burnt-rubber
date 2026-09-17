@@ -99,9 +99,11 @@ export function updateBoard(ctx) {
   } else if (tab === 'teams') {
     rows.push(`<div class="rr-meta" style="padding:10px 0 4px;font-weight:800;letter-spacing:.08em">TEAM BETS — either driver counts</div>`);
     for (const tm of m.teams) {
-      const [pri, sec, base] = tm.colors;
+      // NB: not `base` — that name holds the shared { tourId, cycle } leg base,
+      // and shadowing it spread a colour string into every team leg instead.
+      const [pri, sec, tri] = tm.colors;
       rows.push(`
-        <div class="race-row team-row" style="--tp:${pri};--ts:${sec};--tb:${base || '#fff'}">
+        <div class="race-row team-row" style="--tp:${pri};--ts:${sec};--tb:${tri || '#fff'}">
           <div class="team-swatch"><i></i><i></i><i></i></div>
           <div class="rr-info">
             <div class="rr-name">${tm.team}</div>

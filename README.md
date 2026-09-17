@@ -103,8 +103,16 @@ Global RTP is **0.92**: an outcome with true model probability `p` pays
 including scripted facts (holeshot, fastest lap, margin) and popup props,
 whose outcomes are drawn at their priced probability and then choreographed
 into the race. Settlement of popup bets is whatever actually played out on
-screen. The sponsorship bonus is funded by the one-time fee (of which only
-25% is recoverable), keeping the combined product near the global RTP.
+screen, and it lands *when* it played out: each popup carries the race-time
+fraction at which the picture settles it — the moment the pit clock stops as
+the car pulls away, the instant a "hold P4" loses the place, the frame a
+surge completes — and the bet pays out there rather than at the flag, so
+back-to-back in-race betting keeps moving. Bets that need the classification
+(winner, podium, margin, fastest lap) still wait for the chequered flag. A
+settled ticket stays on the live rail for a few seconds, marked WON or LOST,
+instead of vanishing. The sponsorship bonus is funded by the one-time fee (of
+which only 25% is recoverable), keeping the combined product near the global
+RTP.
 
 ## The broadcast
 

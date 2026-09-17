@@ -285,6 +285,8 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .lb b { color: var(--txt); }
 .lb .ok { color: var(--green); } .lb .bad { color: var(--red); }
+.lb-won { border-color: rgba(60, 220, 130, 0.55); box-shadow: 0 0 14px rgba(60, 220, 130, 0.18); }
+.lb-lost { border-color: rgba(230, 80, 80, 0.45); opacity: 0.75; }
 
 /* ---------- popup bet ---------- */
 .popup-bet {

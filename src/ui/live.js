@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { tourState } from '../engine/schedule.js';
 import { getScript, getFocusLayer } from '../engine/script.js';
 import { RTP, fmtOdds } from '../engine/odds.js';
-import { placeBet, store, focusRacerIdx, openBetsFor, isSponsored, settleDue } from '../engine/bets.js';
+import { placeBet, store, focusRacerIdx, liveBetsFor, isSponsored, settleDue } from '../engine/bets.js';
 import { CAMERA_MODES } from '../three/cameras.js';
 import { portraitDataURI } from './avatars.js';
 import { clamp } from '../core/rng.js';
@@ -343,7 +343,8 @@ function updateTower(ctx, st, script, gridMode) {
   const order = gridMode ? script.grid : script.standings(clamp(st.tRace / script.T, 0, 1), scene?.adj ?? null);
   const focusIdx = focusRacerIdx(race);
   const betIds = new Set();
-  for (const b of openBetsFor(race)) for (const l of b.legs) if (l.racerId) betIds.add(l.racerId);
+  // Infinity hold: a bet settling mid-race must not un-mark its racer.
+  for (const b of liveBetsFor(race, Date.now(), Infinity)) for (const l of b.legs) if (l.racerId) betIds.add(l.racerId);
 
   const max = Math.min(order.length, 20);
   let html = '';
@@ -365,12 +366,21 @@ function updateLiveBets(ctx, st, script) {
   liveBetsTick = performance.now();
   const race = st.race;
   const scene = ctx.currentScene;
-  const bets = openBetsFor(race).slice(0, 3);
+  // Settled side bets stay on the rail briefly so a mid-race result is seen
+  // landing, instead of the ticket just disappearing.
+  const now = Date.now();
+  const all = liveBetsFor(race, now);
+  all.sort((a, b) => (a.status === 'open' ? 1 : 0) - (b.status === 'open' ? 1 : 0));
+  const bets = all.slice(0, 3);
   const s = clamp(st.tRace / script.T, 0, 1);
   $('live-bets').innerHTML = bets.map((b) => {
     const leg = b.legs.find((l) => l.tourId === race.tourId && l.cycle === race.cycle);
     let status = '';
-    if (leg?.racerId) {
+    if (b.status !== 'open') {
+      status = b.status === 'won'
+        ? ` — <span class="ok">WON +${b.payout.toLocaleString()} ◈</span>`
+        : ' — <span class="bad">LOST</span>';
+    } else if (leg?.racerId) {
       const idx = race.field.findIndex((r) => r.id === leg.racerId);
       if (idx >= 0) {
         const p = script.standings(s, scene?.adj ?? null).indexOf(idx) + 1;
@@ -378,7 +388,8 @@ function updateLiveBets(ctx, st, script) {
         status = ` — <span class="${good ? 'ok' : 'bad'}">now P${p}</span>`;
       }
     }
-    return `<div class="lb"><b>${leg?.label || b.kind}</b> · ${b.stake}◈ @ ${fmtOdds(b.odds)}${status}</div>`;
+    const done = b.status === 'open' ? '' : ` lb-${b.status}`;
+    return `<div class="lb${done}"><b>${leg?.label || b.kind}</b> · ${b.stake}◈ @ ${fmtOdds(b.odds)}${status}</div>`;
   }).join('');
 }
 

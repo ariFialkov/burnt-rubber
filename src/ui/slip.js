@@ -28,7 +28,10 @@ export function initSlip(ctx) {
 }
 
 export function legKey(l) {
-  return [l.tourId, l.cycle, l.market, l.racerId || '', l.vsRacerId || '', l.line || ''].join('#');
+  // Every field that can distinguish two otherwise-identical offers must be in
+  // here: team markets carry no racerId, popups carry no racer/line at all.
+  return [l.tourId, l.cycle, l.market, l.racerId || '', l.vsRacerId || '',
+    l.team || '', l.line || '', l.n || '', l.popupId || '', l.side || ''].join('#');
 }
 
 export function hasLeg(l) {
@@ -96,10 +99,16 @@ function place() {
   if (!(stake > 0)) return;
   // Drop legs whose race left the betting window while the slip sat open.
   const valid = slip.legs.filter((l) => {
-    const st = tourState(l.tourId);
-    return st.phase === 'betting' && st.cycle === l.cycle;
+    try {
+      const st = tourState(l.tourId);
+      return st.phase === 'betting' && st.cycle === l.cycle;
+    } catch {
+      return false; // a malformed leg is dropped, never a thrown click handler
+    }
   });
-  if (valid.length < slip.legs.length) ctxRef.toast('Some legs expired — betting closed', 'lose');
+  if (valid.length < slip.legs.length) {
+    ctxRef.toast(valid.length ? 'Some legs expired — betting closed' : 'Betting closed', 'lose');
+  }
   slip.legs = valid;
   if (!valid.length) { renderSlip(); ctxRef.refreshBoard?.(); return; }
 
